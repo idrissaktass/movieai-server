@@ -3,72 +3,86 @@ import mongoose from "mongoose";
 const UserSchema = new mongoose.Schema(
   { 
     name: { type: String, required: true },
+
     email: { type: String, required: true, unique: true },
-    password: { type: String, required: true },
+
+    // 🔐 AUTH
+    password: { type: String }, // ❗ artık zorunlu değil
+    authProvider: { 
+      type: String, 
+      enum: ["local", "google"], 
+      default: "local" 
+    },
+
     createdAt: { type: Date, default: Date.now },
+
+    // 🎬 FAVORITES
     favorites: [
-    {
-      movieId: Number,
-      title: String,
-      posterPath: String,
-      voteAverage: Number,
-    },
-  ],
-  likes: {
-  type: [
-    {
-      movieId: Number,
-      title: String,
-      posterPath: String,
-      voteAverage: Number,
-    },
-  ],
-  default: [],
-},
+      {
+        movieId: Number,
+        title: String,
+        posterPath: String,
+        voteAverage: Number,
+      },
+    ],
 
-dislikes: {
-  type: [
-    {
-      movieId: Number,
-      title: String,
-      posterPath: String,
-      voteAverage: Number,
+    // 👍 LIKES
+    likes: {
+      type: [
+        {
+          movieId: Number,
+          title: String,
+          posterPath: String,
+          voteAverage: Number,
+        },
+      ],
+      default: [],
     },
-  ],
-  default: [],
-},
-tasteProfile: {
-  type: {
-    topGenre: {
-      genreId: String,
-      count: Number,
-      updatedAt: Date,
-    },
-    topDirector: {
-      id: Number,
-      name: String,
-      count: Number,
-      updatedAt: Date,
-    },
-    topActor: {
-      id: Number,
-      name: String,
-      count: Number,
-      updatedAt: Date,
-    },
-  },
-  default: {
-    topGenre: null,
-    topDirector: null,
-    topActor: null,
-  },
-},
 
-tasteProfileMeta: {
-  likesCountAtBuild: Number,
-}
+    // 👎 DISLIKES
+    dislikes: {
+      type: [
+        {
+          movieId: Number,
+          title: String,
+          posterPath: String,
+          voteAverage: Number,
+        },
+      ],
+      default: [],
+    },
 
+    // 🧠 TASTE PROFILE
+    tasteProfile: {
+      type: {
+        topGenre: {
+          genreId: String,
+          count: Number,
+          updatedAt: Date,
+        },
+        topDirector: {
+          id: Number,
+          name: String,
+          count: Number,
+          updatedAt: Date,
+        },
+        topActor: {
+          id: Number,
+          name: String,
+          count: Number,
+          updatedAt: Date,
+        },
+      },
+      default: {
+        topGenre: null,
+        topDirector: null,
+        topActor: null,
+      },
+    },
 
+    tasteProfileMeta: {
+      likesCountAtBuild: Number,
+    }
   },
   { versionKey: false }
 );

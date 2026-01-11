@@ -1,48 +1,213 @@
+import "dotenv/config";
 import express from "express";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import User from "../models/User.js";
 
+import { OAuth2Client } from "google-auth-library";
+
 const router = express.Router();
 
-/* REGISTER */
+/* =======================
+   CONFIG
+======================= */
+const GOOGLE_WEB_CLIENT_ID =
+  process.env.GOOGLE_WEB_CLIENT_ID ||
+  "472876253224-c5cf3sobe1sd2eh8k1h2jikggentkdjd.apps.googleusercontent.com";
+
+const GOOGLE_WEB_CLIENT_SECRET = process.env.GOOGLE_WEB_CLIENT_SECRET;
+
+// Render domain / callback route'un
+const GOOGLE_REDIRECT_URI =
+  "https://movieai-server.onrender.com/api/auth/google/callback";
+
+// Deep link (app'e dönüş)
+const APP_DEEPLINK = "aimovie://login-callback";
+
+const oauth2Client = new OAuth2Client(
+  GOOGLE_WEB_CLIENT_ID,
+  GOOGLE_WEB_CLIENT_SECRET
+);
+
+/* =======================
+   REGISTER
+======================= */
 router.post("/register", async (req, res) => {
-  const { email, password, name } = req.body;
+  try {
+    const { email, password, name } = req.body;
 
-  if (!email || !password || !name)
-    return res.status(400).json({ message: "Missing fields" });
+    if (!email || !password || !name)
+      return res.status(400).json({ message: "Missing fields" });
 
-  const exists = await User.findOne({ email });
-  if (exists)
-    return res.status(400).json({ message: "User already exists" });
+    const exists = await User.findOne({ email });
+    if (exists)
+      return res.status(400).json({ message: "User already exists" });
 
-  const hash = await bcrypt.hash(password, 10);
-  const user = await User.create({ email, password: hash, name });
+    const hash = await bcrypt.hash(password, 10);
 
-  const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, {
-    expiresIn: "7d",
-  });
+    const user = await User.create({
+      email,
+      password: hash,
+      name,
+      authProvider: "local",
+      profileCompleted: false,
+      isPremium: false,
+    });
 
-  res.json({ token });
+    const token = jwt.sign(
+      { id: user._id, isPremium: user.isPremium },
+      process.env.JWT_SECRET,
+      { expiresIn: "7d" }
+    );
+
+    res.json({
+      token,
+      user: {
+        _id: user._id,
+        email: user.email,
+        profileCompleted: user.profileCompleted,
+        isPremium: user.isPremium,
+      },
+    });
+  } catch (e) {
+    console.error("REGISTER ERROR:", e);
+    res.status(500).json({ message: "REGISTER_FAILED" });
+  }
 });
 
-/* LOGIN */
+/* =======================
+   LOGIN
+======================= */
 router.post("/login", async (req, res) => {
-  const { email, password } = req.body;
+  try {
+    const { email, password } = req.body;
 
-  const user = await User.findOne({ email });
-  if (!user)
-    return res.status(400).json({ message: "Invalid credentials" });
+    const user = await User.findOne({ email });
+    if (!user)
+      return res.status(400).json({ message: "Invalid credentials" });
 
-  const ok = await bcrypt.compare(password, user.password);
-  if (!ok)
-    return res.status(400).json({ message: "Invalid credentials" });
+    // google hesabı password ile girmesin
+    if (user.authProvider === "google") {
+      return res.status(400).json({
+        message: "This email is registered with Google. Please use Google login.",
+      });
+    }
 
-  const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, {
-    expiresIn: "7d",
+    const ok = await bcrypt.compare(password, user.password || "");
+    if (!ok)
+      return res.status(400).json({ message: "Invalid credentials" });
+
+    const token = jwt.sign(
+      { id: user._id, isPremium: user.isPremium },
+      process.env.JWT_SECRET,
+      { expiresIn: "7d" }
+    );
+
+    res.json({
+      token,
+      user: {
+        _id: user._id,
+        email: user.email,
+        profileCompleted: user.profileCompleted,
+        isPremium: user.isPremium,
+      },
+    });
+  } catch (e) {
+    console.error("LOGIN ERROR:", e);
+    res.status(500).json({ message: "LOGIN_FAILED" });
+  }
+});
+
+/* =====================================================
+   🚀 GOOGLE LOGIN START (APP bunu açar)
+   GET /api/auth/google/start
+===================================================== */
+router.get("/google/start", (req, res) => {
+  // state istersen ileride kullanırsın; şimdilik sabit deeplink yeter
+  const url = oauth2Client.generateAuthUrl({
+    access_type: "offline",
+    scope: ["profile", "email"],
+    prompt: "select_account",
+    redirect_uri: GOOGLE_REDIRECT_URI,
+    // state: APP_DEEPLINK, // istersen ekle
   });
 
-  res.json({ token });
+  return res.redirect(url);
+});
+
+/* =====================================================
+   🔁 GOOGLE CALLBACK (TOKEN EXCHANGE + USER CREATE)
+   GET /api/auth/google/callback
+===================================================== */
+router.get("/google/callback", async (req, res) => {
+  try {
+    const { code } = req.query;
+
+    if (!code) {
+      return res.redirect(`${APP_DEEPLINK}?reason=ERROR_CODE`);
+    }
+
+    // 1) code -> tokens
+    const { tokens } = await oauth2Client.getToken({
+      code,
+      redirect_uri: GOOGLE_REDIRECT_URI,
+    });
+
+    if (!tokens?.id_token) {
+      return res.redirect(`${APP_DEEPLINK}?reason=NO_ID_TOKEN`);
+    }
+
+    // 2) id_token -> google profile
+    const ticket = await oauth2Client.verifyIdToken({
+      idToken: tokens.id_token,
+      audience: GOOGLE_WEB_CLIENT_ID,
+    });
+
+    const payload = ticket.getPayload();
+    const email = payload?.email;
+
+    if (!email) {
+      return res.redirect(`${APP_DEEPLINK}?reason=NO_EMAIL`);
+    }
+
+    // 3) Eğer email local hesapla kayıtlıysa, Google ile girişe izin verme
+    const localUser = await User.findOne({ email, authProvider: "local" });
+    if (localUser) {
+      return res.redirect(`${APP_DEEPLINK}?reason=EMAIL_REGISTERED_WITH_PASSWORD`);
+    }
+
+    // 4) Google user bul / oluştur
+    let user = await User.findOne({ email, authProvider: "google" });
+
+    if (!user) {
+      user = await User.create({
+        email,
+        name: payload?.name || "",
+        authProvider: "google",
+        profileCompleted: false,
+        isPremium: false,
+        weightUnit: "kg",
+        heightUnit: "cm",
+      });
+    }
+
+    // 5) JWT oluştur
+    const jwtToken = jwt.sign(
+      { id: user._id, isPremium: user.isPremium },
+      process.env.JWT_SECRET,
+      { expiresIn: "7d" }
+    );
+
+    // 6) App'e dön (token + bazı paramlar)
+    const redirect = `${APP_DEEPLINK}?token=${encodeURIComponent(
+      jwtToken
+    )}&userId=${user._id}&profileCompleted=${user.profileCompleted}`;
+
+    return res.redirect(redirect);
+  } catch (err) {
+    console.error("GOOGLE CALLBACK ERROR:", err);
+    return res.redirect(`${APP_DEEPLINK}?reason=ERROR_CODE`);
+  }
 });
 
 export default router;
