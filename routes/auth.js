@@ -30,7 +30,7 @@ const oauth2Client = new OAuth2Client(
 );
 
 /* =======================
-   REGISTER
+   REGISTER (LOCAL)
 ======================= */
 router.post("/register", async (req, res) => {
   try {
@@ -50,68 +50,39 @@ router.post("/register", async (req, res) => {
       password: hash,
       name,
       authProvider: "local",
-      profileCompleted: false,
-      isPremium: false,
     });
 
-    const token = jwt.sign(
-      { id: user._id, isPremium: user.isPremium },
-      process.env.JWT_SECRET,
-      { expiresIn: "7d" }
-    );
-
-    res.json({
-      token,
-      user: {
-        _id: user._id,
-        email: user.email,
-        profileCompleted: user.profileCompleted,
-        isPremium: user.isPremium,
-      },
+    const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, {
+      expiresIn: "7d",
     });
+
+    res.json({ token });
   } catch (e) {
-    console.error("REGISTER ERROR:", e);
-    res.status(500).json({ message: "REGISTER_FAILED" });
+  console.error("REGISTER ERROR FULL:", e);
+  res.status(500).json({ message: e.message || "REGISTER_FAILED" });
   }
 });
 
 /* =======================
-   LOGIN
+   LOGIN (LOCAL)
 ======================= */
 router.post("/login", async (req, res) => {
   try {
     const { email, password } = req.body;
 
     const user = await User.findOne({ email });
-    if (!user)
+    if (!user || user.authProvider !== "local")
       return res.status(400).json({ message: "Invalid credentials" });
-
-    // google hesabı password ile girmesin
-    if (user.authProvider === "google") {
-      return res.status(400).json({
-        message: "This email is registered with Google. Please use Google login.",
-      });
-    }
 
     const ok = await bcrypt.compare(password, user.password || "");
     if (!ok)
       return res.status(400).json({ message: "Invalid credentials" });
 
-    const token = jwt.sign(
-      { id: user._id, isPremium: user.isPremium },
-      process.env.JWT_SECRET,
-      { expiresIn: "7d" }
-    );
-
-    res.json({
-      token,
-      user: {
-        _id: user._id,
-        email: user.email,
-        profileCompleted: user.profileCompleted,
-        isPremium: user.isPremium,
-      },
+    const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, {
+      expiresIn: "7d",
     });
+
+    res.json({ token });
   } catch (e) {
     console.error("LOGIN ERROR:", e);
     res.status(500).json({ message: "LOGIN_FAILED" });
@@ -119,45 +90,32 @@ router.post("/login", async (req, res) => {
 });
 
 /* =====================================================
-   🚀 GOOGLE LOGIN START (APP bunu açar)
-   GET /api/auth/google/start
+   🚀 GOOGLE LOGIN START
 ===================================================== */
 router.get("/google/start", (req, res) => {
-  // state istersen ileride kullanırsın; şimdilik sabit deeplink yeter
   const url = oauth2Client.generateAuthUrl({
     access_type: "offline",
     scope: ["profile", "email"],
     prompt: "select_account",
     redirect_uri: GOOGLE_REDIRECT_URI,
-    // state: APP_DEEPLINK, // istersen ekle
   });
 
-  return res.redirect(url);
+  res.redirect(url);
 });
 
 /* =====================================================
-   🔁 GOOGLE CALLBACK (TOKEN EXCHANGE + USER CREATE)
-   GET /api/auth/google/callback
+   🔁 GOOGLE CALLBACK
 ===================================================== */
 router.get("/google/callback", async (req, res) => {
   try {
     const { code } = req.query;
+    if (!code) return res.redirect(`${APP_DEEPLINK}?reason=NO_CODE`);
 
-    if (!code) {
-      return res.redirect(`${APP_DEEPLINK}?reason=ERROR_CODE`);
-    }
-
-    // 1) code -> tokens
     const { tokens } = await oauth2Client.getToken({
       code,
       redirect_uri: GOOGLE_REDIRECT_URI,
     });
 
-    if (!tokens?.id_token) {
-      return res.redirect(`${APP_DEEPLINK}?reason=NO_ID_TOKEN`);
-    }
-
-    // 2) id_token -> google profile
     const ticket = await oauth2Client.verifyIdToken({
       idToken: tokens.id_token,
       audience: GOOGLE_WEB_CLIENT_ID,
@@ -165,49 +123,42 @@ router.get("/google/callback", async (req, res) => {
 
     const payload = ticket.getPayload();
     const email = payload?.email;
+    if (!email) return res.redirect(`${APP_DEEPLINK}?reason=NO_EMAIL`);
 
-    if (!email) {
-      return res.redirect(`${APP_DEEPLINK}?reason=NO_EMAIL`);
-    }
-
-    // 3) Eğer email local hesapla kayıtlıysa, Google ile girişe izin verme
+    // Eğer local hesap varsa, google login engelle
     const localUser = await User.findOne({ email, authProvider: "local" });
     if (localUser) {
-      return res.redirect(`${APP_DEEPLINK}?reason=EMAIL_REGISTERED_WITH_PASSWORD`);
+      return res.redirect(
+        `${APP_DEEPLINK}?reason=EMAIL_REGISTERED_WITH_PASSWORD`
+      );
     }
 
-    // 4) Google user bul / oluştur
     let user = await User.findOne({ email, authProvider: "google" });
 
     if (!user) {
       user = await User.create({
         email,
-        name: payload?.name || "",
+        name: payload?.name || "Google User",
         authProvider: "google",
-        profileCompleted: false,
-        isPremium: false,
-        weightUnit: "kg",
-        heightUnit: "cm",
       });
     }
 
-    // 5) JWT oluştur
-    const jwtToken = jwt.sign(
-      { id: user._id, isPremium: user.isPremium },
-      process.env.JWT_SECRET,
-      { expiresIn: "7d" }
+    const jwtToken = jwt.sign({ id: user._id }, process.env.JWT_SECRET, {
+      expiresIn: "7d",
+    });
+
+    return res.redirect(
+      `${APP_DEEPLINK}?token=${encodeURIComponent(jwtToken)}`
     );
-
-    // 6) App'e dön (token + bazı paramlar)
-    const redirect = `${APP_DEEPLINK}?token=${encodeURIComponent(
-      jwtToken
-    )}&userId=${user._id}&profileCompleted=${user.profileCompleted}`;
-
-    return res.redirect(redirect);
   } catch (err) {
     console.error("GOOGLE CALLBACK ERROR:", err);
-    return res.redirect(`${APP_DEEPLINK}?reason=ERROR_CODE`);
+    res.redirect(`${APP_DEEPLINK}?reason=ERROR`);
   }
 });
+
+router.get("/test", (req, res) => {
+  res.json({ ok: true, message: "Auth route çalışıyor" });
+});
+
 
 export default router;

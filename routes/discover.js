@@ -470,35 +470,56 @@ router.get("/by-director", authMiddleware, async (req, res) => {
   const d = await r.json();
   res.json(d.results?.slice(0,10) || []);
 });
-router.get("/by-actor", authMiddleware, ensureTasteProfile, async (req, res) => {
+
+
+router.get("/top-actor", authMiddleware, ensureTasteProfile, async (req, res) => {
+  try {
+    let ta = req.user.tasteProfile?.topActor;
+
+    // ✅ STRONG varsa (>=2)
+    if (ta && typeof ta.id === "number" && ta.count >= 2) {
+      return res.json({
+        ready: true,
+        weak: false,
+        ...ta
+      });
+    }
+
+    // ⚠️ STRONG yok → SOFT hesapla
+    const soft = await buildTasteProfile(req.user, process.env.TMDB_API_KEY, {
+      buildGenre: false,
+      buildDirector: false,
+      buildActor: true,
+      includeWeak: true,
+    });
+
+    if (!soft.topActor) {
+      return res.json({
+        ready: false,
+        weak: false,
+        reason: "no_actor"
+      });
+    }
+
+    // 🟡 WEAK TOP VAR
+    return res.json({
+      ready: false,
+      weak: true,
+      ...soft.topActor
+    });
+
+  } catch (e) {
+    console.error("TOP ACTOR ERROR:", e);
+    res.status(500).json({ ready: false, error: "server_error" });
+  }
+});
+
+router.get("/by-actor", authMiddleware, async (req, res) => {
   try {
     let { actorId } = req.query;
 
-    // 🔍 1. Eğer actorId GELMEDİYSE → otomatik seç
-    if (!actorId) {
-      const strong = req.user.tasteProfile?.topActor;
+    if (!actorId) return res.json([]);
 
-      // ✅ strong varsa
-      if (strong && typeof strong.id === "number" && strong.count >= 2) {
-        actorId = strong.id;
-      } else {
-        // ⚠️ strong yok → soft bul
-        const soft = await buildTasteProfile(req.user, process.env.TMDB_API_KEY, {
-          buildGenre: false,
-          buildDirector: false,
-          buildActor: true,
-          includeWeak: true,
-        });
-
-        if (!soft.topActor) {
-          return res.json([]); // hiç data yok
-        }
-
-        actorId = soft.topActor.id;
-      }
-    }
-
-    // 🎬 2. Artık actorId garanti var → TMDB’den çek
     const r = await fetch(
       `${TMDB_BASE}/discover/movie?api_key=${process.env.TMDB_API_KEY}&with_cast=${actorId}&sort_by=popularity.desc`
     );
@@ -512,32 +533,31 @@ router.get("/by-actor", authMiddleware, ensureTasteProfile, async (req, res) => 
   }
 });
 
-router.get("/by-actor", authMiddleware, async (req, res) => {
-  const { actorId } = req.query;
 
-  const r = await fetch(
-    `${TMDB_BASE}/discover/movie?api_key=${process.env.TMDB_API_KEY}&with_cast=${actorId}&sort_by=popularity.desc`
-  );
-
-  const d = await r.json();
-  res.json(d.results?.slice(0,10) || []);
-});
 router.get("/hidden-gems", authMiddleware, async (req, res) => {
   try {
-    const topGenreRes = await fetch(`http://localhost:3000/api/discover/top-genre`, {
-      headers: { Authorization: req.headers.authorization }
-    });
+    const topGenreRes = await fetch(
+      `${process.env.BASE_URL}/api/discover/top-genre`,
+      {
+        headers: { Authorization: req.headers.authorization }
+      }
+    );
+
     const { genreId } = await topGenreRes.json();
 
-    const url = `${TMDB_BASE}/discover/movie?api_key=${process.env.TMDB_API_KEY}&with_genres=${genreId}&vote_average.gte=7.4&vote_count.lte=4000&sort_by=vote_average.desc`;
+    if (!genreId) return res.json([]);
+
+    const url = `${TMDB_BASE}/discover/movie?api_key=${process.env.TMDB_API_KEY}&with_genres=${genreId}&vote_average.gte=6&vote_count.gte=400&sort_by=vote_average.desc`;
 
     const r = await fetch(url);
     const d = await r.json();
 
-    res.json(d.results?.slice(0,10) || []);
-  } catch {
+    res.json(d.results?.slice(0, 10) || []);
+  } catch (e) {
+    console.error("HIDDEN GEMS ERROR:", e);
     res.status(500).json([]);
   }
 });
+
 
 export default router;
