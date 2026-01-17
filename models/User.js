@@ -23,6 +23,7 @@ const UserSchema = new mongoose.Schema(
         title: String,
         posterPath: String,
         voteAverage: Number,
+        overview: String
       },
     ],
 
@@ -34,6 +35,7 @@ const UserSchema = new mongoose.Schema(
           title: String,
           posterPath: String,
           voteAverage: Number,
+          overview: String
         },
       ],
       default: [],
@@ -47,6 +49,7 @@ const UserSchema = new mongoose.Schema(
           title: String,
           posterPath: String,
           voteAverage: Number,
+          overview: String
         },
       ],
       default: [],

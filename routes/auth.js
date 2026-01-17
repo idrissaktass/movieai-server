@@ -8,6 +8,31 @@ import { OAuth2Client } from "google-auth-library";
 
 const router = express.Router();
 
+const authMiddleware = async (req, res, next) => {
+  const header = req.headers.authorization;
+  if (!header || !header.startsWith('Bearer ')) {
+    return res.status(401).json({ error: "Token formatı hatalı veya yok" });
+  }
+
+  try {
+    const token = header.split(" ")[1];
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+
+    const user = await User.findById(decoded.id);
+    if (!user) {
+      return res.status(401).json({ error: "Kullanıcı bulunamadı" });
+    }
+
+    req.user = user;
+    req.userId = decoded.id;
+    req.isPremium = decoded.isPremium || false;
+
+    next();
+  } catch (err) {
+    return res.status(401).json({ error: "Geçersiz token" });
+  }
+};
+
 /* =======================
    CONFIG
 ======================= */
@@ -154,6 +179,16 @@ router.get("/google/callback", async (req, res) => {
     console.error("GOOGLE CALLBACK ERROR:", err);
     res.redirect(`${APP_DEEPLINK}?reason=ERROR`);
   }
+});
+
+router.get("/me", authMiddleware, async (req, res) => {
+  res.json({
+    user: {
+      id: req.user._id,
+      name: req.user.name,
+      email: req.user.email,
+    },
+  });
 });
 
 router.get("/test", (req, res) => {

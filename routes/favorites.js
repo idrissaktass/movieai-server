@@ -46,7 +46,7 @@ router.get("/", authMiddleware, (req, res) => {
 ================================ */
 
 router.post("/toggle", authMiddleware, async (req, res) => {
-  const { movieId, title, posterPath, voteAverage } = req.body;
+  const { movieId, title, posterPath, voteAverage, overview } = req.body;
 
   if (!movieId) {
     return res.status(400).json({ error: "movieId gerekli" });
@@ -66,6 +66,7 @@ router.post("/toggle", authMiddleware, async (req, res) => {
       title,
       posterPath,
       voteAverage,
+      overview
     });
   }
 
@@ -73,7 +74,7 @@ router.post("/toggle", authMiddleware, async (req, res) => {
   res.json(req.user.favorites);
 });
 router.post("/like", authMiddleware, async (req, res) => {
-  const { movieId, title, posterPath, voteAverage } = req.body;
+  const { movieId, title, posterPath, voteAverage, overview } = req.body;
 
   if (!movieId) return res.status(400).json({ error: "movieId gerekli" });
 
@@ -85,14 +86,14 @@ router.post("/like", authMiddleware, async (req, res) => {
   if (exists) {
     req.user.likes = req.user.likes.filter(l => l.movieId !== movieId);
   } else {
-    req.user.likes.push({ movieId, title, posterPath, voteAverage });
+    req.user.likes.push({ movieId, title, posterPath, voteAverage, overview });
   }
   req.user.tasteProfile = {};
   await req.user.save();
   res.json({ likes: req.user.likes, dislikes: req.user.dislikes });
 });
 router.post("/dislike", authMiddleware, async (req, res) => {
-  const { movieId, title, posterPath, voteAverage } = req.body;
+  const { movieId, title, posterPath, voteAverage, overview } = req.body;
 
   if (!movieId) return res.status(400).json({ error: "movieId gerekli" });
 
@@ -104,7 +105,7 @@ router.post("/dislike", authMiddleware, async (req, res) => {
   if (exists) {
     req.user.dislikes = req.user.dislikes.filter(d => d.movieId !== movieId);
   } else {
-    req.user.dislikes.push({ movieId, title, posterPath, voteAverage });
+    req.user.dislikes.push({ movieId, title, posterPath, voteAverage, overview });
   }
   req.user.tasteProfile = {};
   await req.user.save();

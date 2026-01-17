@@ -138,13 +138,14 @@ Suggest exactly 5 movies.
 For each movie:
 - Give a match score between 80 and 99 based on how well it fits.
 - Higher = better match.
+- For each movie give a short explanation that why this movie is recommended.
 
 Return ONLY valid JSON in this format:
 
 [
-  { "title": "Movie name", "match": 92 }
+  { "title": "Movie name", "match": 92, "exp": "Short Explanation" }
 ]
-
+match
 No explanation. No text. Only JSON.
 `;
 
@@ -226,6 +227,7 @@ router.post("/ai", async (req, res) => {
         tmdbResults.push({
           ...movie,
           aiMatch: item.match, // 🔥 gerçek skor
+          aiExp: item.exp, 
         });
       }
     }
