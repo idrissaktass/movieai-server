@@ -47,7 +47,7 @@ const GOOGLE_REDIRECT_URI =
   "https://moodflix-server.onrender.com/api/auth/google/callback";
 
 // Deep link (app'e dönüş)
-const APP_DEEPLINK = "aimovie://login-callback";
+const APP_DEEPLINK = "moodflix://login-callback";
 
 const oauth2Client = new OAuth2Client(
   GOOGLE_WEB_CLIENT_ID,
