@@ -139,7 +139,7 @@ For each movie:
 - Give a match score between 80 and 99 based on how well it fits.
 - Higher = better match.
 - For each movie give a short explanation that why this movie is recommended.
-
+respond in JSON array format DO NOT add any extra text.
 Return ONLY valid JSON in this format:
 
 [
@@ -211,21 +211,23 @@ const tagKeywords = {
 };
 
 router.post("/ai", authMiddleware, async (req, res) => {
-  console.log("🔥 /discover/ai HIT");
+  console.log("🔥 /ai HIT USER:", req.user.email);
+
   try {
     const filters = req.body;
-
     const recommendedIds = req.user.recommendedHistory || [];
 
-    const aiResults = await getAIMovieMatches(filters);
+    // 🤖 AI’dan film isimlerini al
+    let aiResults = await getAIMovieMatches(filters);
     console.log("🤖 AI MATCHES:", aiResults);
 
     let freshResults = [];
     let fallbackResults = [];
 
+    // 🎬 TMDB’de ara + daha önce önerilmiş mi ayır
     for (const item of aiResults) {
       const movie = await fetchFromTMDBByName(item.title);
-      if (!movie) continue;
+      if (!movie || !movie.poster_path) continue;
 
       const enriched = {
         ...movie,
@@ -234,39 +236,56 @@ router.post("/ai", authMiddleware, async (req, res) => {
       };
 
       if (!recommendedIds.includes(movie.id)) {
-        freshResults.push(enriched);     // 🆕 hiç önerilmemiş
+        freshResults.push(enriched);   // 🆕 yeni
       } else {
-        fallbackResults.push(enriched);  // ♻️ daha önce önerilmiş
+        fallbackResults.push(enriched); // ♻️ eski
       }
     }
 
-    // 🎯 Önce yeni filmler, yetmezse eskiler
+    console.log("🗂️ history:", recommendedIds.length, "new:", freshResults.length, "old:", fallbackResults.length);
+
+    // 🎯 önce yeniler, yetmezse eskiler
     let finalResults = [...freshResults];
-
     if (finalResults.length < 5) {
-      finalResults = [
-        ...finalResults,
-        ...fallbackResults.slice(0, 5 - finalResults.length),
-      ];
-    }
-    console.log("🗂️ recommendedHistory size:", recommendedIds.length);
-    console.log("✅ fresh:", freshResults.length, "♻️ fallback:", fallbackResults.length);
-    // 🛡️ HALA boşsa (aşırı edge case)
-    if (finalResults.length === 0) {
-      return res.json({ success: true, results: [] });
+      finalResults.push(...fallbackResults.slice(0, 5 - finalResults.length));
     }
 
-    // ✅ DB'ye sadece GERÇEKTEN gösterilenleri yaz
-    const newIds = finalResults.map(m => m.id);
+    // 🧠 HALA 5 değilse → TMDB fallback (benzer/popüler)
+    if (finalResults.length < 5) {
+      console.log("⚠️ AI yetmedi → TMDB fallback");
 
+      const r = await fetch(
+        `${TMDB_BASE}/discover/movie?api_key=${process.env.TMDB_API_KEY}&sort_by=popularity.desc&vote_count.gte=200&vote_average.gte=6`
+      );
+      const d = await r.json();
+
+      const extra = (d.results || [])
+        .filter(m => m.poster_path) // 🔥 KRİTİK
+        .filter(m => !recommendedIds.includes(m.id))
+        .filter(m => !finalResults.some(f => f.id === m.id))
+        .slice(0, 5 - finalResults.length)
+        .map(m => ({
+          ...m,
+          aiMatch: 80,
+          aiExp: "Recommended based on similar popular movies.",
+        }));
+
+      finalResults.push(...extra);
+    }
+
+    // 🛡️ son güvenlik
+    finalResults = finalResults.slice(0, 5);
+
+    // 💾 DB’ye kaydet (sadece gerçekten gösterilenler)
     await User.findByIdAndUpdate(req.userId, {
-      $addToSet: { recommendedHistory: { $each: newIds } }
+      $addToSet: {
+        recommendedHistory: { $each: finalResults.map(m => m.id) }
+      }
     });
 
-    res.json({
-      success: true,
-      results: finalResults,
-    });
+    console.log("💾 saved:", finalResults.map(f => f.title));
+
+    res.json({ success: true, results: finalResults });
 
   } catch (err) {
     console.error("❌ AI DISCOVER ERROR:", err);
@@ -275,7 +294,7 @@ router.post("/ai", authMiddleware, async (req, res) => {
 });
 
 
-router.post("/", authMiddleware, async (req, res) => {
+router.post("/", async (req, res) => {
   try {
     const { intent, energy, runtime, aura, quickTags, genres } = req.body;
 
@@ -341,11 +360,6 @@ router.post("/", authMiddleware, async (req, res) => {
     const data = await response.json();
 
     let finalResults = data.results || [];
-    const recommendedIds = req.user?.recommendedHistory || [];
-
-    finalResults = finalResults.filter(
-      movie => !recommendedIds.includes(movie.id)
-    );
 
     // 🔴 HATA BURADAYDI: fbRes.res.json() düzeltildi ve failsafe güçlendirildi
     if (finalResults.length === 0) {
