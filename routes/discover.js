@@ -121,7 +121,7 @@ export async function fetchFromTMDBByName(title) {
   return data.results?.[0] || null;
 }
 
-async function getAIMovieMatches(filters, excludedTitles = []) {
+async function getAIMovieMatches(filters) {
   const prompt = `
 You are an advanced AI movie recommendation engine.
 
@@ -132,40 +132,33 @@ Runtime: ${filters.runtime}
 Aura: ${filters.aura}
 Quick tags: ${filters.quickTags?.join(", ")}
 
-Movies that MUST NOT be suggested again:
-${excludedTitles.join(", ") || "none"}
-
 Task:
 Suggest exactly 5 movies.
 
-Rules:
-- If perfect matches do not exist, suggest the closest possible matches.
-- Never return less than 5 movies.
-- Avoid repeating the excluded movies.
-- Prefer real, well-known movies that exist on TMDB.
-
 For each movie:
-- Give a match score between 80 and 99.
-- Give a short explanation.
+- Give a match score between 80 and 99 based on how well it fits.
+- Higher = better match.
+- For each movie give a short explanation that why this movie is recommended.
 
-Return ONLY valid JSON:
+Return ONLY valid JSON in this format:
 
 [
-  { "title": "Movie name", "match": 92, "exp": "Short explanation" }
+  { "title": "Movie name", "match": 92, "exp": "Short Explanation" }
 ]
-
-No text. No markdown. Only JSON.
+match
+No explanation. No text. Only JSON.
 `;
 
   const response = await openai.chat.completions.create({
     model: "gpt-4o-mini",
-    temperature: 0.9,
+    temperature: 0.8,
     messages: [{ role: "user", content: prompt }],
   });
 
-  return JSON.parse(response.choices[0].message.content);
-}
+  const raw = response.choices[0].message.content;
 
+  return JSON.parse(raw);
+}
 
 
 /* 🎭 MOOD → GENRE MAP */
@@ -221,62 +214,60 @@ router.post("/ai", authMiddleware, async (req, res) => {
   try {
     const filters = req.body;
 
-    const excludedIds = req.user.recommendedHistory || [];
-    const excludedTitles = []; // istersen buraya da geçmiş title'ları koyabilirsin
+    // ✅ Kullanıcının daha önce önerilmiş filmleri
+    const recommendedIds = req.user.recommendedHistory || [];
 
-    let finalResults = [];
-    let safety = 0;
+    // 1. AI → film + match skorları
+    const aiResults = await getAIMovieMatches(filters);
+    console.log("🤖 AI MATCHES:", aiResults);
 
-    while (finalResults.length < 5 && safety < 3) {
-      safety++;
+    let tmdbResults = [];
 
-      const aiResults = await getAIMovieMatches(filters, excludedTitles);
+    // 2. TMDB → detay çek
+    for (const item of aiResults) {
+      const movie = await fetchFromTMDBByName(item.title);
 
-      for (const item of aiResults) {
-        if (finalResults.length >= 5) break;
-
-        const movie = await fetchFromTMDBByName(item.title);
-        if (!movie) continue;
-
-        if (excludedIds.includes(movie.id)) continue;
-
-        finalResults.push({
+      if (
+        movie &&
+        !recommendedIds.includes(movie.id) // 🔥 DAHA ÖNCE ÖNERİLMİŞSE ALMA
+      ) {
+        tmdbResults.push({
           ...movie,
           aiMatch: item.match,
           aiExp: item.exp,
         });
-
-        excludedTitles.push(item.title);
-        excludedIds.push(movie.id);
       }
     }
 
-    // 🔥 HALA 5 DEĞİLSE → TMDB’den benzer popüler filmlerle doldur
-    if (finalResults.length < 5) {
-      const r = await fetch(
-        `${TMDB_BASE}/discover/movie?api_key=${process.env.TMDB_API_KEY}&sort_by=popularity.desc&vote_count.gte=1000`
-      );
-      const d = await r.json();
-
-      for (const m of d.results || []) {
-        if (finalResults.length >= 5) break;
-        if (!excludedIds.includes(m.id)) {
-          finalResults.push({ ...m, aiMatch: 80, aiExp: "Popular similar match" });
-          excludedIds.push(m.id);
+    // ⚠️ Eğer hepsi daha önce önerilmişse (fallback)
+    if (tmdbResults.length === 0) {
+      console.log("⚠️ All AI movies were used before, allowing repeats");
+      for (const item of aiResults) {
+        const movie = await fetchFromTMDBByName(item.title);
+        if (movie) {
+          tmdbResults.push({
+            ...movie,
+            aiMatch: item.match,
+            aiExp: item.exp,
+          });
         }
       }
     }
 
-    // ✅ geçmişe kaydet
-    req.user.recommendedHistory = [
-      ...(req.user.recommendedHistory || []),
-      ...finalResults.map(f => f.id)
-    ];
+    // 3. Skora göre sırala
+    tmdbResults.sort((a, b) => b.aiMatch - a.aiMatch);
 
-    req.user.markModified("recommendedHistory");
-    await req.user.save();
+    // 4. ✅ ÖNERİLENLERİ KULLANICIYA KAYDET
+    const newIds = tmdbResults.map(m => m.id);
 
-    res.json({ success: true, results: finalResults });
+    await User.findByIdAndUpdate(req.userId, {
+      $addToSet: { recommendedHistory: { $each: newIds } } // tekrar eklemez
+    });
+
+    res.json({
+      success: true,
+      results: tmdbResults,
+    });
 
   } catch (err) {
     console.error("❌ AI DISCOVER ERROR:", err);
@@ -284,7 +275,7 @@ router.post("/ai", authMiddleware, async (req, res) => {
   }
 });
 
-router.post("/", async (req, res) => {
+router.post("/", authMiddleware, async (req, res) => {
   try {
     const { intent, energy, runtime, aura, quickTags, genres } = req.body;
 
@@ -350,6 +341,11 @@ router.post("/", async (req, res) => {
     const data = await response.json();
 
     let finalResults = data.results || [];
+    const recommendedIds = req.user?.recommendedHistory || [];
+
+    finalResults = finalResults.filter(
+      movie => !recommendedIds.includes(movie.id)
+    );
 
     // 🔴 HATA BURADAYDI: fbRes.res.json() düzeltildi ve failsafe güçlendirildi
     if (finalResults.length === 0) {
