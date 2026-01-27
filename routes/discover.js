@@ -211,62 +211,61 @@ const tagKeywords = {
 };
 
 router.post("/ai", authMiddleware, async (req, res) => {
+  console.log("🔥 /discover/ai HIT");
   try {
     const filters = req.body;
 
-    // ✅ Kullanıcının daha önce önerilmiş filmleri
     const recommendedIds = req.user.recommendedHistory || [];
 
-    // 1. AI → film + match skorları
     const aiResults = await getAIMovieMatches(filters);
     console.log("🤖 AI MATCHES:", aiResults);
 
-    let tmdbResults = [];
+    let freshResults = [];
+    let fallbackResults = [];
 
-    // 2. TMDB → detay çek
     for (const item of aiResults) {
       const movie = await fetchFromTMDBByName(item.title);
+      if (!movie) continue;
 
-      if (
-        movie &&
-        !recommendedIds.includes(movie.id) // 🔥 DAHA ÖNCE ÖNERİLMİŞSE ALMA
-      ) {
-        tmdbResults.push({
-          ...movie,
-          aiMatch: item.match,
-          aiExp: item.exp,
-        });
+      const enriched = {
+        ...movie,
+        aiMatch: item.match,
+        aiExp: item.exp,
+      };
+
+      if (!recommendedIds.includes(movie.id)) {
+        freshResults.push(enriched);     // 🆕 hiç önerilmemiş
+      } else {
+        fallbackResults.push(enriched);  // ♻️ daha önce önerilmiş
       }
     }
 
-    // ⚠️ Eğer hepsi daha önce önerilmişse (fallback)
-    if (tmdbResults.length === 0) {
-      console.log("⚠️ All AI movies were used before, allowing repeats");
-      for (const item of aiResults) {
-        const movie = await fetchFromTMDBByName(item.title);
-        if (movie) {
-          tmdbResults.push({
-            ...movie,
-            aiMatch: item.match,
-            aiExp: item.exp,
-          });
-        }
-      }
+    // 🎯 Önce yeni filmler, yetmezse eskiler
+    let finalResults = [...freshResults];
+
+    if (finalResults.length < 5) {
+      finalResults = [
+        ...finalResults,
+        ...fallbackResults.slice(0, 5 - finalResults.length),
+      ];
+    }
+    console.log("🗂️ recommendedHistory size:", recommendedIds.length);
+    console.log("✅ fresh:", freshResults.length, "♻️ fallback:", fallbackResults.length);
+    // 🛡️ HALA boşsa (aşırı edge case)
+    if (finalResults.length === 0) {
+      return res.json({ success: true, results: [] });
     }
 
-    // 3. Skora göre sırala
-    tmdbResults.sort((a, b) => b.aiMatch - a.aiMatch);
-
-    // 4. ✅ ÖNERİLENLERİ KULLANICIYA KAYDET
-    const newIds = tmdbResults.map(m => m.id);
+    // ✅ DB'ye sadece GERÇEKTEN gösterilenleri yaz
+    const newIds = finalResults.map(m => m.id);
 
     await User.findByIdAndUpdate(req.userId, {
-      $addToSet: { recommendedHistory: { $each: newIds } } // tekrar eklemez
+      $addToSet: { recommendedHistory: { $each: newIds } }
     });
 
     res.json({
       success: true,
-      results: tmdbResults,
+      results: finalResults,
     });
 
   } catch (err) {
@@ -274,6 +273,7 @@ router.post("/ai", authMiddleware, async (req, res) => {
     res.status(500).json({ success: false, error: err.message });
   }
 });
+
 
 router.post("/", authMiddleware, async (req, res) => {
   try {
