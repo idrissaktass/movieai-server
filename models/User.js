@@ -2,6 +2,11 @@ import mongoose from "mongoose";
 
 const UserSchema = new mongoose.Schema(
   { 
+    recommendedHistory: {
+      type: [Number], // TMDB movieId
+      default: [],
+    },
+
     name: { type: String, required: true },
 
     email: { type: String, required: true, unique: true },

@@ -121,7 +121,7 @@ export async function fetchFromTMDBByName(title) {
   return data.results?.[0] || null;
 }
 
-async function getAIMovieMatches(filters) {
+async function getAIMovieMatches(filters, excludedTitles = []) {
   const prompt = `
 You are an advanced AI movie recommendation engine.
 
@@ -132,33 +132,40 @@ Runtime: ${filters.runtime}
 Aura: ${filters.aura}
 Quick tags: ${filters.quickTags?.join(", ")}
 
+Movies that MUST NOT be suggested again:
+${excludedTitles.join(", ") || "none"}
+
 Task:
 Suggest exactly 5 movies.
 
-For each movie:
-- Give a match score between 80 and 99 based on how well it fits.
-- Higher = better match.
-- For each movie give a short explanation that why this movie is recommended.
+Rules:
+- If perfect matches do not exist, suggest the closest possible matches.
+- Never return less than 5 movies.
+- Avoid repeating the excluded movies.
+- Prefer real, well-known movies that exist on TMDB.
 
-Return ONLY valid JSON in this format:
+For each movie:
+- Give a match score between 80 and 99.
+- Give a short explanation.
+
+Return ONLY valid JSON:
 
 [
-  { "title": "Movie name", "match": 92, "exp": "Short Explanation" }
+  { "title": "Movie name", "match": 92, "exp": "Short explanation" }
 ]
-match
-No explanation. No text. Only JSON.
+
+No text. No markdown. Only JSON.
 `;
 
   const response = await openai.chat.completions.create({
     model: "gpt-4o-mini",
-    temperature: 0.8,
+    temperature: 0.9,
     messages: [{ role: "user", content: prompt }],
   });
 
-  const raw = response.choices[0].message.content;
-
-  return JSON.parse(raw);
+  return JSON.parse(response.choices[0].message.content);
 }
+
 
 
 /* 🎭 MOOD → GENRE MAP */
@@ -210,35 +217,66 @@ const tagKeywords = {
   twist: "10620",     // Plot twist
 };
 
-router.post("/ai", async (req, res) => {
+router.post("/ai", authMiddleware, async (req, res) => {
   try {
     const filters = req.body;
 
-    // 1. AI → film + match skorları
-    const aiResults = await getAIMovieMatches(filters);
-    console.log("🤖 AI MATCHES:", aiResults);
+    const excludedIds = req.user.recommendedHistory || [];
+    const excludedTitles = []; // istersen buraya da geçmiş title'ları koyabilirsin
 
-    const tmdbResults = [];
+    let finalResults = [];
+    let safety = 0;
 
-    // 2. TMDB → detay çek + match ekle
-    for (const item of aiResults) {
-      const movie = await fetchFromTMDBByName(item.title);
-      if (movie) {
-        tmdbResults.push({
+    while (finalResults.length < 5 && safety < 3) {
+      safety++;
+
+      const aiResults = await getAIMovieMatches(filters, excludedTitles);
+
+      for (const item of aiResults) {
+        if (finalResults.length >= 5) break;
+
+        const movie = await fetchFromTMDBByName(item.title);
+        if (!movie) continue;
+
+        if (excludedIds.includes(movie.id)) continue;
+
+        finalResults.push({
           ...movie,
-          aiMatch: item.match, // 🔥 gerçek skor
-          aiExp: item.exp, 
+          aiMatch: item.match,
+          aiExp: item.exp,
         });
+
+        excludedTitles.push(item.title);
+        excludedIds.push(movie.id);
       }
     }
 
-    // 3. Skora göre sırala
-    tmdbResults.sort((a, b) => b.aiMatch - a.aiMatch);
+    // 🔥 HALA 5 DEĞİLSE → TMDB’den benzer popüler filmlerle doldur
+    if (finalResults.length < 5) {
+      const r = await fetch(
+        `${TMDB_BASE}/discover/movie?api_key=${process.env.TMDB_API_KEY}&sort_by=popularity.desc&vote_count.gte=1000`
+      );
+      const d = await r.json();
 
-    res.json({
-      success: true,
-      results: tmdbResults,
-    });
+      for (const m of d.results || []) {
+        if (finalResults.length >= 5) break;
+        if (!excludedIds.includes(m.id)) {
+          finalResults.push({ ...m, aiMatch: 80, aiExp: "Popular similar match" });
+          excludedIds.push(m.id);
+        }
+      }
+    }
+
+    // ✅ geçmişe kaydet
+    req.user.recommendedHistory = [
+      ...(req.user.recommendedHistory || []),
+      ...finalResults.map(f => f.id)
+    ];
+
+    req.user.markModified("recommendedHistory");
+    await req.user.save();
+
+    res.json({ success: true, results: finalResults });
 
   } catch (err) {
     console.error("❌ AI DISCOVER ERROR:", err);
