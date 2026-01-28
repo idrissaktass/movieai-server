@@ -89,6 +89,25 @@ router.post("/register", async (req, res) => {
 });
 
 /* =======================
+   ❌ DELETE ACCOUNT
+======================= */
+router.delete("/delete", authMiddleware, async (req, res) => {
+  try {
+    const userId = req.userId;
+
+    await User.findByIdAndDelete(userId);
+
+    return res.json({
+      success: true,
+      message: "Hesap başarıyla silindi",
+    });
+  } catch (err) {
+    console.error("DELETE ACCOUNT ERROR:", err);
+    res.status(500).json({ message: "ACCOUNT_DELETE_FAILED" });
+  }
+});
+
+/* =======================
    LOGIN (LOCAL)
 ======================= */
 router.post("/login", async (req, res) => {

@@ -27,11 +27,10 @@ router.get("/:platform", async (req, res) => {
 
     const randomPage = Math.floor(Math.random() * 20) + 1;
 
-    const url = `${TMDB_BASE}/discover/movie?api_key=${TMDB_KEY}` +
-      `&with_watch_providers=${providerId}` +
-      `&watch_region=TR` +
-      `&sort_by=popularity.desc` +
-      `&page=${randomPage}`;
+const url = `${TMDB_BASE}/discover/movie?api_key=${TMDB_KEY}` +
+  `&with_watch_providers=${providerId}` +
+  `&sort_by=popularity.desc` +
+  `&page=${randomPage}`;
 
     const response = await fetch(url);
     const data = await response.json();
