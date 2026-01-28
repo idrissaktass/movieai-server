@@ -138,7 +138,8 @@ Suggest exactly 5 movies.
 For each movie:
 - Give a match score between 80 and 99 based on how well it fits.
 - Higher = better match.
-- For each movie give a short explanation that why this movie is recommended.
+- For each movie give a short explanation that why this movie is recommended for that user.
+- The short explanation MUST clearly reference the user's intent, energy, aura, runtime or quick tags.Focus on WHY this movie fits THIS user’s current mood and request.
 respond in JSON array format DO NOT add any extra text.
 Return ONLY valid JSON in this format:
 
