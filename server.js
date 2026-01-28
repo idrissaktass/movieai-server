@@ -8,6 +8,7 @@ import favoritesRoutes from "./routes/favorites.js";
 import watchPartyRoutes from "./routes/watchparty.js";
 import { Server } from "socket.io";
 import http from "http";
+import platformRoutes from "./routes/platform.js";
 
 dotenv.config();
 
@@ -19,6 +20,7 @@ app.use("/api/favorites", favoritesRoutes);
 app.use("/api/auth", authRoutes);
 app.use("/api/discover", recommendRoute);
 app.use("/api/watchparty", watchPartyRoutes);
+app.use("/api/platform", platformRoutes);
 
 /* ================= DATABASE ================= */
 
