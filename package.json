@@ -21,7 +21,8 @@
     "jsonwebtoken": "^9.0.3",
     "mongoose": "^9.1.1",
     "node-fetch": "^3.3.2",
-    "openai": "^6.15.0"
+    "openai": "^6.15.0",
+    "socket.io": "^4.8.3"
   },
   "devDependencies": {
     "@types/express": "^5.0.6",

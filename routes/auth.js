@@ -44,7 +44,7 @@ const GOOGLE_WEB_CLIENT_SECRET = process.env.GOOGLE_WEB_CLIENT_SECRET;
 
 // Render domain / callback route'un
 const GOOGLE_REDIRECT_URI =
-  "http://192.168.1.5:3000/api/auth/google/callback";
+  "https://moodflix-server.onrender.com/api/auth/google/callback";
 
 // Deep link (app'e dönüş)
 const APP_DEEPLINK = "moodflix://login-callback";
