@@ -42,100 +42,6 @@ const authMiddleware = async (req, res, next) => {
   }
 };
 
-const checkAndIncrementLimit = async (user) => {
-  if (user.isPremium) return { allowed: true, remaining: "unlimited" };
-
-  const DAILY_LIMIT = 3;
-  const today = new Date().toISOString().slice(0, 10);
-
-  // Tarih değişmişse sayacı sıfırla
-  if (user.dailyUsage.date !== today) {
-    user.dailyUsage.date = today;
-    user.dailyUsage.count = 0;
-  }
-
-  if (user.dailyUsage.count >= DAILY_LIMIT) {
-    return { allowed: false, remaining: 0 };
-  }
-
-  // Hakkı düş ve kaydet
-  user.dailyUsage.count += 1;
-  await user.save();
-  
-  return { allowed: true, remaining: DAILY_LIMIT - user.dailyUsage.count };
-};
-
-function isExpired(date, hours = 24) {
-  if (!date) return true;
-  const diff = Date.now() - new Date(date).getTime();
-  return diff > 1000 * 60 * 60 * hours;
-}
-
-function clean(obj) {
-  return Object.fromEntries(
-    Object.entries(obj).filter(([_, v]) => v !== undefined)
-  );
-}
-
-async function ensureTasteProfile(req, res, next) {
-  const user = req.user;
-
-  const tp = user.tasteProfile || {};
-  const meta = user.tasteProfileMeta || {};
-  const likesCount = user.likes.length;
-
-  const needDirector =
-    !tp.topDirector ||
-    meta.likesCountAtBuild !== likesCount ||
-    isExpired(tp.topDirector?.updatedAt);
-
-  const needGenre =
-    !tp.topGenre ||
-    meta.likesCountAtBuild !== likesCount ||
-    isExpired(tp.topGenre?.updatedAt);
-
-  const needActor =
-    !tp.topActor ||
-    meta.likesCountAtBuild !== likesCount ||
-    isExpired(tp.topActor?.updatedAt);
-
-  if (needGenre || needDirector || needActor) {
-    console.log("🧠 Taste profile rebuild:", {
-      needGenre,
-      needDirector,
-      needActor,
-    });
-
-    const newParts = await buildTasteProfile(
-      user,
-      process.env.TMDB_API_KEY,
-      {
-        buildGenre: needGenre,
-        buildDirector: needDirector,
-        buildActor: needActor,
-        includeWeak: false 
-      }
-    );
-
-  user.tasteProfile = {
-    topGenre: newParts.topGenre ?? tp.topGenre ?? null,
-    topDirector: newParts.topDirector ?? tp.topDirector ?? null,
-    topActor: newParts.topActor ?? tp.topActor ?? null,
-  };
-
-  user.tasteProfileMeta = {
-    likesCountAtBuild: likesCount,
-  };
-
-  user.markModified("tasteProfile"); // 🔥 çok önemli
-  await user.save();
-
-    }
-
-  next();
-}
-
-
 export async function fetchFromTMDBByName(title) {
   const url = `https://api.themoviedb.org/3/search/movie?api_key=${process.env.TMDB_API_KEY}&query=${encodeURIComponent(title)}&language=en-US`;
 
@@ -201,18 +107,6 @@ function getRandomPage(max = 20) {
 
 function pickRandomItems(array, count = 3) {
   return [...array].sort(() => 0.5 - Math.random()).slice(0, count);
-}
-
-/* 🎬 DISCOVER FUNCTION */
-async function discoverMovies(params) {
-  const page = getRandomPage();
-
-  const url = `${TMDB_BASE}/discover/movie?api_key=${process.env.TMDB_API_KEY}&${params}&page=${page}&vote_count.gte=300&vote_average.gte=6.5&include_adult=false&language=en-US`;
-
-  const res = await fetch(url);
-  const data = await res.json();
-
-  return pickRandomItems(data.results || [], 3);
 }
 
 // backend/routes/discover.ts (Veya ilgili dosyanız)
@@ -461,200 +355,6 @@ router.post("/", async (req, res) => {
   }
 });
 
-router.get("/top-genre", authMiddleware, ensureTasteProfile, async (req, res) => {
-  try {
-    let tg = req.user.tasteProfile?.topGenre;
-
-    // ✅ SADECE GERÇEKTEN STRONG İSE
-    if (tg && typeof tg.genreId === "string" && tg.count >= 2) {
-      return res.json({
-        ready: true,
-        weak: false,
-        ...tg
-      });
-    }
-
-    // ⚠️ STRONG YOK → SOFT (WEAK) HESAPLA
-    const soft = await buildTasteProfile(req.user, process.env.TMDB_API_KEY, {
-      buildGenre: true,
-      buildDirector: false,
-      buildActor: false,
-      includeWeak: true,
-    });
-
-    if (!soft.topGenre) {
-      return res.json({
-        ready: false,
-        weak: false,
-        reason: "no_genre"
-      });
-    }
-
-    // 🟡 WEAK TOP VAR
-    return res.json({
-      ready: false,
-      weak: true,
-      ...soft.topGenre
-    });
-
-  } catch (e) {
-    console.error("TOP GENRE ERROR:", e);
-    res.status(500).json({ ready: false, error: "server_error" });
-  }
-});
-
-
-
-router.get("/by-genre", authMiddleware, async (req, res) => {
-  try {
-    const { genreId } = req.query;
-    if (!genreId) return res.json([]);
-
-    // 1. Kullanıcının beğendiği film ID'lerini al
-    const likedMovieIds = req.user.likes.map(movie => String(movie.movieId));
-
-    // 2. TMDB'den önerileri çek (Biraz fazla çekelim ki eledikten sonra elimizde film kalsın)
-    const r = await fetch(
-      `https://api.themoviedb.org/3/discover/movie?api_key=${process.env.TMDB_API_KEY}&with_genres=${genreId}&sort_by=popularity.desc&page=1`
-    );
-    const d = await r.json();
-    const results = d.results || [];
-
-    // 3. Zaten beğenilmiş olanları filtrele
-    const filteredResults = results.filter(
-      (movie) => !likedMovieIds.includes(String(movie.id))
-    );
-
-    // 4. Sadece beğenilmemiş ilk 10 filmi dön
-    res.json(filteredResults.slice(0, 10));
-  } catch (e) {
-    console.log("GENRE RECOMMEND ERROR", e);
-    res.status(500).json([]);
-  }
-});
-router.get("/top-director", authMiddleware, ensureTasteProfile, async (req, res) => {
-  try {
-    let td = req.user.tasteProfile?.topDirector;
-
-    console.log("xd strong check:", td);
-
-    // ✅ SADECE GERÇEKTEN STRONG İSE
-    if (td && typeof td.id === "number" && td.count >= 2) {
-      return res.json({
-        ready: true,
-        weak: false,
-        ...td
-      });
-    }
-
-    console.log("➡️ strong yok, soft hesaplanıyor");
-
-    // ⚠️ STRONG YOK → SOFT (WEAK) HESAPLA
-    const soft = await buildTasteProfile(req.user, process.env.TMDB_API_KEY, {
-      buildGenre: false,
-      buildDirector: true,
-      buildActor: false,
-      includeWeak: true,
-    });
-
-    console.log("➡️ soft result:", soft);
-
-    if (!soft.topDirector) {
-      return res.json({
-        ready: false,
-        weak: false,
-        reason: "no_director"
-      });
-    }
-
-    // 🟡 WEAK TOP VAR
-    return res.json({
-      ready: false,
-      weak: true,
-      ...soft.topDirector
-    });
-
-  } catch (e) {
-    console.error("TOP DIRECTOR ERROR:", e);
-    res.status(500).json({ ready: false, error: "server_error" });
-  }
-});
-
-
-router.get("/by-director", authMiddleware, async (req, res) => {
-  const { directorId } = req.query;
-
-  const r = await fetch(
-    `${TMDB_BASE}/discover/movie?api_key=${process.env.TMDB_API_KEY}&with_crew=${directorId}&sort_by=popularity.desc`
-  );
-
-  const d = await r.json();
-  res.json(d.results?.slice(0,10) || []);
-});
-
-
-router.get("/top-actor", authMiddleware, ensureTasteProfile, async (req, res) => {
-  try {
-    let ta = req.user.tasteProfile?.topActor;
-
-    // ✅ STRONG varsa (>=2)
-    if (ta && typeof ta.id === "number" && ta.count >= 2) {
-      return res.json({
-        ready: true,
-        weak: false,
-        ...ta
-      });
-    }
-
-    // ⚠️ STRONG yok → SOFT hesapla
-    const soft = await buildTasteProfile(req.user, process.env.TMDB_API_KEY, {
-      buildGenre: false,
-      buildDirector: false,
-      buildActor: true,
-      includeWeak: true,
-    });
-
-    if (!soft.topActor) {
-      return res.json({
-        ready: false,
-        weak: false,
-        reason: "no_actor"
-      });
-    }
-
-    // 🟡 WEAK TOP VAR
-    return res.json({
-      ready: false,
-      weak: true,
-      ...soft.topActor
-    });
-
-  } catch (e) {
-    console.error("TOP ACTOR ERROR:", e);
-    res.status(500).json({ ready: false, error: "server_error" });
-  }
-});
-
-router.get("/by-actor", authMiddleware, async (req, res) => {
-  try {
-    let { actorId } = req.query;
-
-    if (!actorId) return res.json([]);
-
-    const r = await fetch(
-      `${TMDB_BASE}/discover/movie?api_key=${process.env.TMDB_API_KEY}&with_cast=${actorId}&sort_by=popularity.desc`
-    );
-
-    const d = await r.json();
-    res.json(d.results?.slice(0, 10) || []);
-
-  } catch (e) {
-    console.error("BY ACTOR ERROR:", e);
-    res.status(500).json([]);
-  }
-});
-
-
 router.get("/hidden-gems", authMiddleware, async (req, res) => {
   try {
     const topGenreRes = await fetch(
@@ -680,5 +380,55 @@ router.get("/hidden-gems", authMiddleware, async (req, res) => {
   }
 });
 
+router.post("/ai-personal", authMiddleware, async (req, res) => {
+  try {
+    if (!req.isPremium) {
+      return res.status(403).json({
+        premiumRequired: true
+      });
+    }
+
+    const likes = req.user.likes || [];
+
+    if (likes.length < 3) {
+      return res.json([]);
+    }
+
+    const likedTitles = likes.slice(0, 10).map(l => l.title).join(", ");
+
+    const prompt = `
+User liked these movies:
+${likedTitles}
+
+Recommend 10 very similar movies.
+
+Return ONLY JSON, no explanations, no text, no apologies, no disclaimers, no notes, just JSON in this format:
+[
+ { "title": "movie name" }
+]
+`;
+
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [{ role: "user", content: prompt }],
+      temperature: 0.9
+    });
+
+    const ai = JSON.parse(response.choices[0].message.content);
+
+    const movies = [];
+
+    for (const item of ai) {
+      const movie = await fetchFromTMDBByName(item.title);
+      if (movie?.poster_path) movies.push(movie);
+    }
+
+    res.json(movies.slice(0, 10));
+
+  } catch (e) {
+    console.log("AI PERSONAL ERROR", e);
+    res.status(500).json([]);
+  }
+});
 
 export default router;
