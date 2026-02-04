@@ -41,6 +41,29 @@ const authMiddleware = async (req, res, next) => {
   }
 };
 
+const checkAndIncrementLimit = async (user) => {
+  if (user.isPremium) return { allowed: true, remaining: "unlimited" };
+
+  const DAILY_LIMIT = 3;
+  const today = new Date().toISOString().slice(0, 10);
+
+  // Tarih değişmişse sayacı sıfırla
+  if (user.dailyUsage.date !== today) {
+    user.dailyUsage.date = today;
+    user.dailyUsage.count = 0;
+  }
+
+  if (user.dailyUsage.count >= DAILY_LIMIT) {
+    return { allowed: false, remaining: 0 };
+  }
+
+  // Hakkı düş ve kaydet
+  user.dailyUsage.count += 1;
+  await user.save();
+  
+  return { allowed: true, remaining: DAILY_LIMIT - user.dailyUsage.count };
+};
+
 function isExpired(date, hours = 24) {
   if (!date) return true;
   const diff = Date.now() - new Date(date).getTime();
@@ -211,21 +234,68 @@ const tagKeywords = {
   twist: "10620",     // Plot twist
 };
 
-router.post("/ai", authMiddleware, async (req, res) => {
-  console.log("🔥 /ai HIT USER:", req.user.email);
+// backend/routes/discover.js
 
+router.post("/ai", authMiddleware, async (req, res) => {
   try {
+    const DAILY_LIMIT = 3;
+    const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD formatı
+
+    /* ====================================================
+        1. LIMIT VE TARIH KONTROLÜ (SYNCHRONIZATION)
+    ==================================================== */
+    if (!req.isPremium) {
+      // Eğer user modelinde dailyUsage alanı hiç oluşmamışsa başlat
+      if (!req.user.dailyUsage) {
+        req.user.dailyUsage = { count: 0, date: today };
+      }
+
+      // Yeni bir güne girilmişse sayacı sıfırla ve tarihi güncelle
+      if (req.user.dailyUsage.date !== today) {
+        req.user.dailyUsage.date = today;
+        req.user.dailyUsage.count = 0;
+      }
+
+      // Limit kontrolü
+      if (req.user.dailyUsage.count >= DAILY_LIMIT) {
+        return res.json({
+          success: false,
+          limitReached: true,
+          remaining: 0,
+          currentCount: req.user.dailyUsage.count
+        });
+      }
+
+      // Hakkı burada düşüyoruz (İstek başarılı sayılmadan önce)
+      req.user.dailyUsage.count += 1;
+      req.user.markModified("dailyUsage");
+      await req.user.save();
+    }
+
+    /* ====================================================
+        2. AI RECOMMENDATION LOGIC
+    ==================================================== */
     const filters = req.body;
     const recommendedIds = req.user.recommendedHistory || [];
 
-    // 🤖 AI’dan film isimlerini al
-    let aiResults = await getAIMovieMatches(filters);
-    console.log("🤖 AI MATCHES:", aiResults);
-
+    // OpenAI'dan önerileri al
+    let aiResults;
+    try {
+      aiResults = await getAIMovieMatches(filters);
+    } catch (aiErr) {
+      // AI patlarsa kullanıcının hakkını geri ver
+      if (!req.isPremium) {
+        req.user.dailyUsage.count -= 1;
+        req.user.markModified("dailyUsage");
+        await req.user.save();
+      }
+      throw new Error("AI Service temporary unavailable: " + aiErr.message);
+    }
+    
     let freshResults = [];
     let fallbackResults = [];
 
-    // 🎬 TMDB’de ara + daha önce önerilmiş mi ayır
+    // TMDB'de ara + geçmiş kontrolü
     for (const item of aiResults) {
       const movie = await fetchFromTMDBByName(item.title);
       if (!movie || !movie.poster_path) continue;
@@ -236,64 +306,63 @@ router.post("/ai", authMiddleware, async (req, res) => {
         aiExp: item.exp,
       };
 
+      // Daha önce önerilmediyse fresh listesine, önerildiyse fallback listesine
       if (!recommendedIds.includes(movie.id)) {
-        freshResults.push(enriched);   // 🆕 yeni
+        freshResults.push(enriched);
       } else {
-        fallbackResults.push(enriched); // ♻️ eski
+        fallbackResults.push(enriched);
       }
     }
 
-    console.log("🗂️ history:", recommendedIds.length, "new:", freshResults.length, "old:", fallbackResults.length);
-
-    // 🎯 önce yeniler, yetmezse eskiler
+    // Sonuçları birleştir (Öncelik hiç görülmemişlerde)
     let finalResults = [...freshResults];
     if (finalResults.length < 5) {
       finalResults.push(...fallbackResults.slice(0, 5 - finalResults.length));
     }
 
-    // 🧠 HALA 5 değilse → TMDB fallback (benzer/popüler)
+    /* ====================================================
+        3. FAILSAFE (YETERLI SONUÇ YOKSA)
+    ==================================================== */
     if (finalResults.length < 5) {
-      console.log("⚠️ AI yetmedi → TMDB fallback");
-
       const r = await fetch(
         `${TMDB_BASE}/discover/movie?api_key=${process.env.TMDB_API_KEY}&sort_by=popularity.desc&vote_count.gte=200&vote_average.gte=6`
       );
       const d = await r.json();
-
       const extra = (d.results || [])
-        .filter(m => m.poster_path) // 🔥 KRİTİK
-        .filter(m => !recommendedIds.includes(m.id))
-        .filter(m => !finalResults.some(f => f.id === m.id))
+        .filter(m => m.poster_path && !recommendedIds.includes(m.id) && !finalResults.some(f => f.id === m.id))
         .slice(0, 5 - finalResults.length)
         .map(m => ({
           ...m,
           aiMatch: 80,
-          aiExp: "Recommended based on similar popular movies.",
+          aiExp: "A highly rated choice based on your general preferences.",
         }));
-
       finalResults.push(...extra);
     }
 
-    // 🛡️ son güvenlik
     finalResults = finalResults.slice(0, 5);
 
-    // 💾 DB’ye kaydet (sadece gerçekten gösterilenler)
+    /* ====================================================
+        4. DB GÜNCELLEME VE YANIT
+    ==================================================== */
+    // Önerilenleri geçmişe ekle
     await User.findByIdAndUpdate(req.userId, {
       $addToSet: {
         recommendedHistory: { $each: finalResults.map(m => m.id) }
       }
     });
 
-    console.log("💾 saved:", finalResults.map(f => f.title));
-
-    res.json({ success: true, results: finalResults });
+    res.json({
+      success: true,
+      results: finalResults,
+      remaining: req.isPremium ? "unlimited" : DAILY_LIMIT - req.user.dailyUsage.count,
+      currentCount: req.user.dailyUsage.count
+    });
 
   } catch (err) {
-    console.error("❌ AI DISCOVER ERROR:", err);
+    console.error("AI ROUTE ERROR:", err);
     res.status(500).json({ success: false, error: err.message });
   }
 });
-
 
 router.post("/", async (req, res) => {
   try {

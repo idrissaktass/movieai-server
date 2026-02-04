@@ -59,6 +59,19 @@ const UserSchema = new mongoose.Schema(
       ],
       default: [],
     },
+  isPremium: {
+    type: Boolean,
+    default: false,
+  },
+dailyUsage: {
+  count: { type: Number, default: 0 },
+  date: { type: String, default: () => new Date().toISOString().slice(0, 10) } 
+},
+weeklyRoomUsage: {
+  count: { type: Number, default: 0 },
+  lastResetDate: { type: String, default: () => new Date().toISOString().slice(0, 10) }
+},
+  premiumExpiresAt: Date,
 
     // 🧠 TASTE PROFILE
     tasteProfile: {

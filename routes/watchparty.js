@@ -80,18 +80,43 @@ async function fetchFromTMDBByName(title) {
 }
 
 /* ================= ROUTES ================= */
+// 1. ODA OLUŞTURMA (Burada sadece ön kontrol yapıyoruz, hak düşmüyoruz)
+// routes/watchparty.js -> /create rotası
 
 router.post("/create", authMiddleware, async (req, res) => {
-  const code = crypto.randomBytes(3).toString("hex");
+  const WEEKLY_LIMIT = 3;
+  const today = new Date();
+  const todayStr = today.toISOString().slice(0, 10);
 
-  const party = await WatchParty.create({
-    code,
-    host: req.userId
-  });
+  if (!req.user.isPremium) {
+    if (!req.user.weeklyRoomUsage) {
+      req.user.weeklyRoomUsage = { count: 0, lastResetDate: todayStr };
+    }
 
-  console.log("🔥 PARTY CREATED:", code); // 👈 BUNU EKLE
+    // Haftalık sıfırlama kontrolü
+    const lastReset = new Date(req.user.weeklyRoomUsage.lastResetDate);
+    const diffDays = Math.ceil(Math.abs(today - lastReset) / (1000 * 60 * 60 * 24));
+    
+    if (diffDays >= 7) {
+      req.user.weeklyRoomUsage.count = 0;
+      req.user.weeklyRoomUsage.lastResetDate = todayStr;
+    }
 
-  res.json({ code });
+    if (req.user.weeklyRoomUsage.count >= WEEKLY_LIMIT) {
+      return res.status(403).json({ error: "Weekly limit reached", limitReached: true });
+    }
+
+    // 🔥 KRİTİK EKSİK BURASI: Sayacı artır ve kaydet
+    req.user.weeklyRoomUsage.count += 1;
+    req.user.markModified("weeklyRoomUsage"); // Obje içindeki değişiklikleri Mongoose'a bildir
+    await req.user.save();
+  }
+
+  const code = crypto.randomBytes(3).toString("hex").toUpperCase();
+  await WatchParty.create({ code, host: req.userId });
+
+  // Güncel count değerini dön
+  res.json({ code, weeklyCount: req.user.weeklyRoomUsage?.count || 0 });
 });
 
 
@@ -135,67 +160,80 @@ router.post("/answers/:code", authMiddleware, async (req, res) => {
 });
 
 router.post("/generate/:code", authMiddleware, async (req, res) => {
+  // 1. Odayı bul ve Host bilgilerini getir
+  let party = await WatchParty.findOne({ code: req.params.code }).populate("host");
 
-  // 👉 SADECE BİR REQUEST "generating" yapabilsin
-  let party = await WatchParty.findOneAndUpdate(
+  if (!party) return res.status(404).json({ error: "Room not found" });
+
+  // Eğer zaten üretilmişse sonucu dön (Hak düşmez)
+  if (party.status === "done") {
+    return res.json({ results: party.results });
+  }
+
+  // 2. 🛡️ HOST LİMİT KONTROLÜ
+  const host = party.host;
+  const DAILY_LIMIT = 3;
+  const today = new Date().toISOString().slice(0, 10);
+
+  // Premium değilse kontrol et
+  if (!host.isPremium) {
+    if (!host.dailyUsage) host.dailyUsage = { count: 0, date: today };
+
+    if (host.dailyUsage.date !== today) {
+      host.dailyUsage.date = today;
+      host.dailyUsage.count = 0;
+    }
+
+    if (host.dailyUsage.count >= DAILY_LIMIT) {
+      console.log("🚫 Host limit reached:", host.email);
+      return res.json({ limitReached: true }); // Frontend bu "limitReached"i yakalayacak
+    }
+  }
+
+  // 3. Status "generating" yap (Double request koruması)
+  const lockedParty = await WatchParty.findOneAndUpdate(
     { code: req.params.code, status: "ready" },
     { status: "generating" },
     { new: true }
   ).populate("host guest");
 
-  // Eğer ready → generating olmadıysa:
-  if (!party) {
-    const existing = await WatchParty.findOne({ code: req.params.code });
+  if (!lockedParty) return res.json({ loading: true });
 
-    if (!existing) return res.status(404).json({ error: "Room not found" });
-
-    // Zaten üretilmiş
-    if (existing.status === "done") {
-      return res.json({ results: existing.results });
-    }
-
-    // Başkası şu an üretiyor
-    return res.json({ loading: true });
-  }
-
-  // 🧠 SADECE BURAYA 1 KİŞİ GİRER
   try {
+    // 🧠 AI Üretimi
     const aiResults = await getWatchPartyMatches(
-      { ...party.hostAnswers, taste: party.host.tasteProfile },
-      { ...party.guestAnswers, taste: party.guest.tasteProfile }
+      { ...lockedParty.hostAnswers, taste: lockedParty.host.tasteProfile },
+      { ...lockedParty.guestAnswers, taste: lockedParty.guest.tasteProfile }
     );
 
     let finalResults = [];
-
     for (const item of aiResults) {
       const movie = await fetchFromTMDBByName(item.title);
       if (!movie || !movie.poster_path) continue;
-
-      finalResults.push({
-        ...movie,
-        aiMatch: item.match,
-        aiExp: item.exp
-      });
+      finalResults.push({ ...movie, aiMatch: item.match, aiExp: item.exp });
     }
 
     finalResults = finalResults.slice(0, 5);
 
-    party.results = finalResults;
-    party.status = "done";
-    await party.save();
+    // 4. ✅ BAŞARILI: Host'un hakkını düş ve odayı tamamla
+    if (!host.isPremium) {
+      host.dailyUsage.count += 1;
+      host.markModified("dailyUsage");
+      await host.save();
+    }
+
+    lockedParty.results = finalResults;
+    lockedParty.status = "done";
+    await lockedParty.save();
 
     return res.json({ results: finalResults });
 
   } catch (e) {
     console.error("AI ERROR:", e);
-    await WatchParty.updateOne(
-      { code: req.params.code },
-      { status: "ready" }
-    );
+    await WatchParty.updateOne({ code: req.params.code }, { status: "ready" });
     return res.status(500).json({ error: "GENERATION_FAILED" });
   }
 });
-
 
 router.get("/status/:code", authMiddleware, async (req, res) => {
   const party = await WatchParty.findOne({ code: req.params.code });

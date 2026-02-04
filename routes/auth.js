@@ -206,6 +206,8 @@ router.get("/me", authMiddleware, async (req, res) => {
       id: req.user._id,
       name: req.user.name,
       email: req.user.email,
+      isPremium: req.user.isPremium,
+      dailyUsage: req.user.dailyUsage || null,
     },
   });
 });
