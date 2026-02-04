@@ -139,4 +139,18 @@ router.delete("/:id", auth, async (req, res) => {
   res.json({ ok: true });
 });
 
+/* ================= USER POSTS ================= */
+// Bu route profil sayfasındaki "Posts" sekmesini besler
+router.get("/user/:id", async (req, res) => {
+  try {
+    const posts = await Post.find({ userId: req.params.id })
+      .sort({ createdAt: -1 })
+      .lean();
+    res.json(posts);
+  } catch (e) {
+    console.error("User posts error:", e);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
 export default router;

@@ -33,7 +33,8 @@ const authMiddleware = async (req, res, next) => {
 
     req.user = user;
     req.userId = decoded.id;
-    req.isPremium = decoded.isPremium || false;
+    req.isPremium = user.isPremium || false;
+
 
     next();
   } catch (err) {

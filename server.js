@@ -61,32 +61,25 @@ io.on("connection", (socket) => {
     console.log(`🏠 ${socket.id} joined ${roomCode} | users: ${size}`);
   });
 
-  /* -------- ANSWER STATUS -------- */
-  socket.on("host-done", ({ roomCode }) => {
-    io.to(roomCode).emit("host-finished");
+  /* -------- MODE SELECTION -------- */
+  socket.on("host-selecting-mode", ({ roomCode }) => {
+    io.to(roomCode).emit("go-mode-selection");
   });
 
-  socket.on("guest-done", ({ roomCode }) => {
-    io.to(roomCode).emit("guest-finished");
-  });
-socket.on("close-room", ({ roomCode }) => {
-  io.to(roomCode).emit("room-closed");
-  io.socketsLeave(roomCode);
-});
-
-    // 🟢 HOST DEVAM DEDİ → HERKES MOOD
-  socket.on("start-mood", ({ roomCode }) => {
-    io.to(roomCode).emit("go-mood");
-  });
-
-  // 🟡 BİRİ FORMU BİTİRDİ
+  /* -------- USER FINISHED FORM -------- */
   socket.on("user-finished", ({ roomCode, role }) => {
     io.to(roomCode).emit("user-finished", { role });
   });
 
-  // 🔴 İKİSİ DE BİTTİ → RESULTS
+  /* -------- ALL FINISHED → RESULTS -------- */
   socket.on("all-finished", ({ roomCode }) => {
     io.to(roomCode).emit("go-results");
+  });
+
+  /* -------- CLOSE ROOM -------- */
+  socket.on("close-room", ({ roomCode }) => {
+    io.to(roomCode).emit("room-closed");
+    io.socketsLeave(roomCode);
   });
 
   /* -------- DISCONNECT -------- */
