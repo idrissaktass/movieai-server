@@ -107,20 +107,23 @@ router.get("/user/:id", async (req, res) => {
 router.post("/:id/like", auth, async (req, res) => {
   try {
     const post = await Post.findById(req.params.id);
+    if (!post) return res.status(404).json({ error: "Post not found" });
 
-    const alreadyLiked = post.likes.includes(req.user.id);
+    // req.userId'nin string olduğundan emin olun
+    const userId = req.userId.toString();
+    const alreadyLiked = post.likes.map(id => id.toString()).includes(userId);
 
-if (alreadyLiked) {
-  post.likes.pull(req.user.id);
-  post.likeCount--;
-} else {
-  post.likes.push(req.user.id);
-  post.likeCount++;
-}
-
+    if (alreadyLiked) {
+      post.likes.pull(req.userId);
+    } else {
+      post.likes.push(req.userId);
+    }
+    
+    // likeCount'u manuel yönetmek yerine her zaman likes.length'e eşitlemek daha güvenlidir
+    post.likeCount = post.likes.length;
     await post.save();
 
-    res.json({ likes: post.likes.length });
+    res.json({ likes: post.likeCount, isLiked: !alreadyLiked });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
