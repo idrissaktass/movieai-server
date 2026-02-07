@@ -187,52 +187,52 @@ router.post("/ai", authMiddleware, async (req, res) => {
       throw new Error("AI Service temporary unavailable: " + aiErr.message);
     }
     
-    let freshResults = [];
-    let fallbackResults = [];
+// 🔥 SADECE SON 20'Yİ ENGELLE
+const recentHistory = recommendedIds.slice(-20);
 
-    // TMDB'de ara + geçmiş kontrolü
-    for (const item of aiResults) {
-      const movie = await fetchFromTMDBByName(item.title);
-      if (!movie || !movie.poster_path) continue;
+let finalResults = [];
 
-      const enriched = {
-        ...movie,
-        aiMatch: item.match,
-        aiExp: item.exp,
-      };
+for (const item of aiResults) {
+  const movie = await fetchFromTMDBByName(item.title);
+  if (!movie || !movie.poster_path) continue;
 
-      // Daha önce önerilmediyse fresh listesine, önerildiyse fallback listesine
-      if (!recommendedIds.includes(movie.id)) {
-        freshResults.push(enriched);
-      } else {
-        fallbackResults.push(enriched);
-      }
-    }
+  // 🚫 SON 20'DE VARSA ASLA EKLEME
+  if (recentHistory.includes(movie.id)) continue;
 
-    // Sonuçları birleştir (Öncelik hiç görülmemişlerde)
-    let finalResults = [...freshResults];
-    if (finalResults.length < 5) {
-      finalResults.push(...fallbackResults.slice(0, 5 - finalResults.length));
-    }
+  finalResults.push({
+    ...movie,
+    aiMatch: item.match,
+    aiExp: item.exp,
+  });
+}
+
 
     /* ====================================================
         3. FAILSAFE (YETERLI SONUÇ YOKSA)
     ==================================================== */
-    if (finalResults.length < 5) {
-      const r = await fetch(
-        `${TMDB_BASE}/discover/movie?api_key=${process.env.TMDB_API_KEY}&sort_by=popularity.desc&vote_count.gte=200&vote_average.gte=6`
-      );
-      const d = await r.json();
-      const extra = (d.results || [])
-        .filter(m => m.poster_path && !recommendedIds.includes(m.id) && !finalResults.some(f => f.id === m.id))
-        .slice(0, 5 - finalResults.length)
-        .map(m => ({
-          ...m,
-          aiMatch: 80,
-          aiExp: "A highly rated choice based on your general preferences.",
-        }));
-      finalResults.push(...extra);
-    }
+if (finalResults.length < 5) {
+  const r = await fetch(
+    `${TMDB_BASE}/discover/movie?api_key=${process.env.TMDB_API_KEY}&sort_by=popularity.desc&vote_count.gte=200&vote_average.gte=6`
+  );
+
+  const d = await r.json();
+
+  const extra = (d.results || [])
+    .filter(m =>
+      m.poster_path &&
+      !recentHistory.includes(m.id) &&     // son 20 engelle
+      !finalResults.some(f => f.id === m.id) // duplicate engelle
+    )
+    .slice(0, 5 - finalResults.length)
+    .map(m => ({
+      ...m,
+      aiMatch: 80,
+      aiExp: "A highly rated choice based on your general preferences.",
+    }));
+
+  finalResults.push(...extra);
+}
+
 
     finalResults = finalResults.slice(0, 5);
 
@@ -241,9 +241,13 @@ router.post("/ai", authMiddleware, async (req, res) => {
     ==================================================== */
     // Önerilenleri geçmişe ekle
     await User.findByIdAndUpdate(req.userId, {
-      $addToSet: {
-        recommendedHistory: { $each: finalResults.map(m => m.id) }
-      }
+$push: {
+  recommendedHistory: {
+    $each: finalResults.map(m => m.id),
+    $slice: -50 // sadece son 50 sakla
+  }
+}
+
     });
 
     res.json({

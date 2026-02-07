@@ -59,10 +59,48 @@ async function fetchMovies(genreMap) {
 /* ================= RANDOM DATA ================= */
 
 const captions = [
-  "Pure cinema 🎬","Hidden gem","Loved every second",
-  "Crazy visuals","Plot twist insane","Weekend vibes",
-  "Comfort movie","Masterpiece","So emotional 😭",
-  "Instant favorite","Underrated fr","10/10 recommend"
+  "Pure cinema vibes",
+  "Hidden gem movie",
+  "Loved every second",
+  "Crazy good visuals",
+  "Plot twist insane",
+  "Weekend movie mood",
+  "Comfort movie night",
+  "Absolute masterpiece film",
+  "So emotional watch",
+  "Instant favorite pick",
+  "Underrated but amazing",
+  "10 out of 10",
+  "Must watch asap",
+  "Rewatching this again",
+  "Late night vibes",
+  "This hit different",
+  "Cinema magic fr",
+  "Better than expected",
+  "So freaking good",
+  "Top tier movie",
+  "Peak storytelling here",
+  "Vibes were unmatched",
+  "Whole theater silent",
+  "Soundtrack goes crazy",
+  "Visuals on point",
+  "Acting was insane",
+  "Story kept me hooked",
+  "Perfect weekend watch",
+  "Can’t stop thinking",
+  "Feels nostalgic af",
+  "Straight fire movie",
+  "Loved the ending",
+  "Cried a little ngl",
+  "This movie slaps",
+  "So cozy watch",
+  "Instant mood booster",
+  "Chill and watch",
+  "Unexpectedly very good",
+  "Super fun ride",
+  "Would recommend everyone",
+  "My new obsession",
+  "Peak cinema moment"
 ];
 
 const usernames = [
@@ -71,7 +109,10 @@ const usernames = [
 ];
 
 const random = (arr) => arr[Math.floor(Math.random() * arr.length)];
-const randomRating = () => +(Math.random() * 10).toFixed(1);
+const randomRating = () => {
+  const steps = [5, 5.5, 6, 6.5, 7, 7.5, 8, 8.5, 9, 9.5, 10];
+  return steps[Math.floor(Math.random() * steps.length)];
+};
 const randomLikes = () => Math.floor(Math.random() * 21);
 
 /* ================= SEED ================= */
