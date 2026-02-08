@@ -131,15 +131,26 @@ router.post("/:id/like", auth, async (req, res) => {
 
 /* ================= DELETE ================= */
 
-router.delete("/:id", auth, async (req, res) => {
-  const post = await Post.findById(req.params.id);
+/* ================= UPDATE POST ================= */
+router.put("/:id", auth, async (req, res) => {
+  try {
+    const post = await Post.findById(req.params.id);
+    if (!post) return res.status(404).json({ error: "Post not found" });
 
-  if (post.userId.toString() !== req.user.id)
-    return res.status(403).json({ error: "Not allowed" });
+    // Sadece sahibi düzenleyebilir
+    if (post.userId.toString() !== req.userId) {
+      return res.status(403).json({ error: "Unauthorized" });
+    }
 
-  await post.deleteOne();
+    const { caption, rating } = req.body;
+    post.caption = caption;
+    post.rating = rating;
 
-  res.json({ ok: true });
+    await post.save();
+    res.json(post);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 /* ================= USER POSTS ================= */

@@ -5,6 +5,7 @@ import jwt from "jsonwebtoken";
 import User from "../models/User.js";
 
 import { OAuth2Client } from "google-auth-library";
+import Post from "../models/Post.js";
 
 const router = express.Router();
 
@@ -210,6 +211,20 @@ router.get("/me", authMiddleware, async (req, res) => {
       dailyUsage: req.user.dailyUsage || null,
     },
   });
+});
+
+// routes/user.js veya auth.js içine ekle
+router.get("/profile/:id", async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id).select("-password -email"); // Hassas verileri gizle
+    if (!user) return res.status(404).json({ error: "User not found" });
+
+    const posts = await Post.find({ userId: req.params.id }).sort({ createdAt: -1 });
+    
+    res.json({ user, posts });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 router.get("/test", (req, res) => {
