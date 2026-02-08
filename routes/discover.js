@@ -61,9 +61,9 @@ Energy: ${filters.energy}
 Runtime: ${filters.runtime}
 Aura: ${filters.aura}
 Quick tags: ${filters.quickTags?.join(", ")}
-
+Genres: ${filters.genres}
 Task:
-Suggest exactly 5 movies.
+SUGGEST EXACTLY 5 MOVIES, NOT LESS NOT MUCH, SUGGEST 5 MOVIES. 
 
 For each movie:
 - Give a match score between 80 and 99 based on how well it fits.
