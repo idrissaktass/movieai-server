@@ -71,6 +71,8 @@ weeklyRoomUsage: {
   count: { type: Number, default: 0 },
   lastResetDate: { type: String, default: () => new Date().toISOString().slice(0, 10) }
 },
+followers: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
+following: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
   premiumExpiresAt: Date,
 
     // 🧠 TASTE PROFILE

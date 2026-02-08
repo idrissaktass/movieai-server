@@ -227,6 +227,39 @@ router.get("/profile/:id", async (req, res) => {
   }
 });
 
+router.post("/follow/:id", authMiddleware, async (req, res) => {
+  try {
+    const targetUserId = req.params.id;
+    const currentUserId = req.userId;
+
+    if (targetUserId === currentUserId.toString()) {
+      return res.status(400).json({ error: "Kendinizi takip edemezsiniz" });
+    }
+
+    const targetUser = await User.findById(targetUserId);
+    const currentUser = await User.findById(currentUserId);
+
+    const isFollowing = currentUser.following.includes(targetUserId);
+
+    if (isFollowing) {
+      // Takibi bırak
+      currentUser.following.pull(targetUserId);
+      targetUser.followers.pull(currentUserId);
+    } else {
+      // Takip et
+      currentUser.following.push(targetUserId);
+      targetUser.followers.push(currentUserId);
+    }
+
+    await currentUser.save();
+    await targetUser.save();
+
+    res.json({ isFollowing: !isFollowing, count: targetUser.followers.length });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 router.get("/test", (req, res) => {
   res.json({ ok: true, message: "Auth route çalışıyor" });
 });
