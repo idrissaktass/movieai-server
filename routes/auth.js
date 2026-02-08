@@ -297,6 +297,40 @@ router.post("/follow/:id", authMiddleware, async (req, res) => {
   }
 });
 
+// routes/auth.js veya user.js içine ekle
+router.get("/search-users", async (req, res) => {
+  try {
+    const { query } = req.query;
+    if (!query || query.length < 2) return res.json([]); // En az 2 harf
+
+    const users = await User.find({
+      name: { $regex: query, $options: "i" }
+    })
+    .select("name _id followers")
+    .limit(5); // Performans için ilk 5-10 kullanıcı
+
+    res.json(users);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+router.get("/users/search", async (req, res) => {
+  try {
+    const { q } = req.query;
+    if (!q) return res.json([]);
+    
+    const users = await User.find({
+      name: { $regex: q, $options: "i" }
+    })
+    .select("name _id followers")
+    .limit(10)
+    .lean();
+
+    res.json(users);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
 router.get("/test", (req, res) => {
   res.json({ ok: true, message: "Auth route çalışıyor" });
 });
