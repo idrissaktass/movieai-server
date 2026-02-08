@@ -217,37 +217,49 @@ router.get("/me", authMiddleware, async (req, res) => {
 router.get("/profile/:id", async (req, res) => {
   try {
     const targetUserId = req.params.id;
+
+    // 1. Kullanıcıyı bul (followers ve following dizilerini de çekiyoruz)
     const user = await User.findById(targetUserId)
       .select("-password -email")
-      .lean(); // lean() performansı artırır ve objeyi manipüle etmemizi sağlar
+      .lean();
 
     if (!user) return res.status(404).json({ error: "User not found" });
 
+    // 2. Postları bul
     const posts = await Post.find({ userId: targetUserId }).sort({ createdAt: -1 });
 
-    // --- Takip Kontrolü ---
+    // 3. Takip Kontrolü (Token varsa)
     let isFollowing = false;
     const authHeader = req.headers.authorization;
     
-    if (authHeader) {
+    if (authHeader && authHeader.startsWith('Bearer ')) {
       try {
         const token = authHeader.split(" ")[1];
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        const currentUser = await User.findById(decoded.id);
-        isFollowing = currentUser.following.includes(targetUserId);
-      } catch (e) { /* Token geçersizse isFollowing false kalır */ }
+        
+        // Kendi profilimizden bakıyorsak currentUser'ı çekip takip listesine bakıyoruz
+        const currentUser = await User.findById(decoded.id).select("following");
+        if (currentUser && currentUser.following) {
+          isFollowing = currentUser.following.includes(targetUserId);
+        }
+      } catch (e) {
+        console.log("Token verify error in profile:", e.message);
+      }
     }
 
+    // 4. Veriyi frontend'in beklediği formatta temizleyip gönder
     res.json({ 
       user: {
         ...user,
-        followersCount: user.followers.length,
-        followingCount: user.following.length,
-        isFollowing // Frontend bu bilgiye göre butonu render eder
+        followersCount: user.followers ? user.followers.length : 0,
+        followingCount: user.following ? user.following.length : 0,
+        favoritesCount: user.favorites ? user.favorites.length : 0,
+        isFollowing 
       }, 
       posts 
     });
   } catch (e) {
+    console.error("Profile route error:", e);
     res.status(500).json({ error: e.message });
   }
 });
