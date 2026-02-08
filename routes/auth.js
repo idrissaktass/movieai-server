@@ -216,12 +216,37 @@ router.get("/me", authMiddleware, async (req, res) => {
 // routes/user.js veya auth.js içine ekle
 router.get("/profile/:id", async (req, res) => {
   try {
-    const user = await User.findById(req.params.id).select("-password -email"); // Hassas verileri gizle
+    const targetUserId = req.params.id;
+    const user = await User.findById(targetUserId)
+      .select("-password -email")
+      .lean(); // lean() performansı artırır ve objeyi manipüle etmemizi sağlar
+
     if (!user) return res.status(404).json({ error: "User not found" });
 
-    const posts = await Post.find({ userId: req.params.id }).sort({ createdAt: -1 });
+    const posts = await Post.find({ userId: targetUserId }).sort({ createdAt: -1 });
+
+    // --- Takip Kontrolü ---
+    let isFollowing = false;
+    const authHeader = req.headers.authorization;
     
-    res.json({ user, posts });
+    if (authHeader) {
+      try {
+        const token = authHeader.split(" ")[1];
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        const currentUser = await User.findById(decoded.id);
+        isFollowing = currentUser.following.includes(targetUserId);
+      } catch (e) { /* Token geçersizse isFollowing false kalır */ }
+    }
+
+    res.json({ 
+      user: {
+        ...user,
+        followersCount: user.followers.length,
+        followingCount: user.following.length,
+        isFollowing // Frontend bu bilgiye göre butonu render eder
+      }, 
+      posts 
+    });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

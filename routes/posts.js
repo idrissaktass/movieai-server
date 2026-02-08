@@ -59,31 +59,36 @@ router.post("/", auth, async (req, res) => {
 router.get("/", async (req, res) => {
   const page = Number(req.query.page) || 1;
   const limit = Number(req.query.limit) || 10;
+  const { search, year, minRating, sort, genre, type } = req.query;
 
-  const { search, year, minRating, sort ,genre} = req.query;
+  let query = {};
 
-  const query = {};
+  // --- TAKİP EDİLENLER FİLTRESİ ---
+  if (type === "following") {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) return res.status(401).json({ error: "Giriş yapmalısınız" });
 
-if (genre) {
-  query.genre = { $in: [genre] };
-}
-  if (search) {
-    query.title = { $regex: search, $options: "i" };
+    try {
+      const token = authHeader.split(" ")[1];
+      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      const user = await User.findById(decoded.id);
+      
+      // Sadece takip ettiğim kişilerin ID'lerini sorguya ekle
+      query.userId = { $in: user.following };
+    } catch (err) {
+      return res.status(401).json({ error: "Geçersiz token" });
+    }
   }
 
-  if (minRating) {
-    query.rating = { $gte: Number(minRating) };
-  }
-
-  if (year) {
-    query.year = Number(year); // ⭐ DOĞRU ALAN
-  }
+  // Mevcut filtrelerin (arama, rating vs.) devamı
+  if (genre) query.genre = { $in: [genre] };
+  if (search) query.title = { $regex: search, $options: "i" };
+  if (minRating) query.rating = { $gte: Number(minRating) };
+  if (year) query.year = Number(year);
 
   let sortObj = { createdAt: -1 };
-
   if (sort === "likes") sortObj = { likeCount: -1 };
   if (sort === "rating") sortObj = { rating: -1 };
-  if (sort === "new") sortObj = { createdAt: -1 };
 
   const posts = await Post.find(query)
     .sort(sortObj)

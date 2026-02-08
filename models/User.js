@@ -73,6 +73,7 @@ weeklyRoomUsage: {
 },
 followers: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
 following: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
+
   premiumExpiresAt: Date,
 
     // 🧠 TASTE PROFILE
@@ -109,5 +110,6 @@ following: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
   },
   { versionKey: false }
 );
-
+UserSchema.index({ followers: 1 });
+UserSchema.index({ following: 1 });
 export default mongoose.model("User", UserSchema);
