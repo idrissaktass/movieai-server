@@ -331,6 +331,26 @@ router.get("/users/search", async (req, res) => {
     res.status(500).json({ error: e.message });
   }
 });
+
+// routes/auth.js içine ekle
+router.get("/profile/:id/network", async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id)
+      .populate("followers", "name _id")
+      .populate("following", "name _id")
+      .select("followers following");
+
+    if (!user) return res.status(404).json({ error: "User not found" });
+
+    res.json({
+      followers: user.followers,
+      following: user.following
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 router.get("/test", (req, res) => {
   res.json({ ok: true, message: "Auth route çalışıyor" });
 });
