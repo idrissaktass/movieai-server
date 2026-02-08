@@ -64,21 +64,24 @@ router.get("/", async (req, res) => {
   let query = {};
 
   // --- TAKİP EDİLENLER FİLTRESİ ---
-  if (type === "following") {
-    const authHeader = req.headers.authorization;
-    if (!authHeader) return res.status(401).json({ error: "Giriş yapmalısınız" });
+// routes/posts.js içindeki router.get("/") kısmı
+if (type === "following") {
+  const authHeader = req.headers.authorization;
+  if (!authHeader) return res.status(401).json({ error: "Giriş yapmalısınız" });
 
-    try {
-      const token = authHeader.split(" ")[1];
-      const decoded = jwt.verify(token, process.env.JWT_SECRET);
-      const user = await User.findById(decoded.id);
-      
-      // Sadece takip ettiğim kişilerin ID'lerini sorguya ekle
-      query.userId = { $in: user.following };
-    } catch (err) {
-      return res.status(401).json({ error: "Geçersiz token" });
-    }
+  try {
+    const token = authHeader.split(" ")[1];
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const user = await User.findById(decoded.id);
+    
+    // Takip ettikleri + Kendisi (Kendi postlarını da akışta görmek için)
+    const feedIds = [...user.following, decoded.id];
+    
+    query.userId = { $in: feedIds };
+  } catch (err) {
+    return res.status(401).json({ error: "Geçersiz token" });
   }
+}
 
   // Mevcut filtrelerin (arama, rating vs.) devamı
   if (genre) query.genre = { $in: [genre] };
