@@ -93,12 +93,19 @@ if (type === "following") {
   if (sort === "likes") sortObj = { likeCount: -1 };
   if (sort === "rating") sortObj = { rating: -1 };
 
-  const posts = await Post.find(query)
-    .sort(sortObj)
-    .skip((page - 1) * limit)
-    .limit(limit)
-    .lean();
-  res.json(posts);
+const posts = await Post.find(query)
+  .sort(sortObj)
+  .skip((page - 1) * limit)
+  .limit(limit);
+
+const formatted = posts.map(p => ({
+  ...p.toObject(),
+  likes: p.likes || [],
+  likeCount: p.likes?.length || 0,
+}));
+
+res.json(formatted);
+
 });
 
 /* ================= USER POSTS ================= */
