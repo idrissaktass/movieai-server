@@ -96,7 +96,7 @@ if (type === "following") {
   const posts = await Post.find(query)
     .sort(sortObj)
     .skip((page - 1) * limit)
-    .limit(limit);
+    .limit(limit)
     .lean();
   res.json(posts);
 });
