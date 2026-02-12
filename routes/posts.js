@@ -97,7 +97,7 @@ if (type === "following") {
     .sort(sortObj)
     .skip((page - 1) * limit)
     .limit(limit);
-
+    .lean();
   res.json(posts);
 });
 
@@ -138,7 +138,23 @@ router.post("/:id/like", auth, async (req, res) => {
 });
 
 /* ================= DELETE ================= */
+/* ================= DELETE POST ================= */
+router.delete("/:id", auth, async (req, res) => {
+  try {
+    const post = await Post.findById(req.params.id);
+    if (!post) return res.status(404).json({ error: "Post not found" });
 
+    // Güvenlik kontrolü: Sadece post sahibi silebilir
+    if (post.userId.toString() !== req.userId) {
+      return res.status(403).json({ error: "Unauthorized: You can only delete your own posts" });
+    }
+
+    await Post.findByIdAndDelete(req.params.id);
+    res.json({ message: "Post deleted successfully" });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
 /* ================= UPDATE POST ================= */
 router.put("/:id", auth, async (req, res) => {
   try {
