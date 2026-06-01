@@ -129,6 +129,28 @@ const tagKeywords = {
   twist: "10620",     // Plot twist
 };
 
+const genreNameMap = {
+  "28": "Action",
+  "12": "Adventure",
+  "16": "Animation",
+  "35": "Comedy",
+  "80": "Crime",
+  "99": "Documentary",
+  "18": "Drama",
+  "10751": "Family",
+  "14": "Fantasy",
+  "36": "History",
+  "27": "Horror",
+  "10402": "Music",
+  "9648": "Mystery",
+  "10749": "Romance",
+  "878": "Science Fiction",
+  "10770": "TV Movie",
+  "53": "Thriller",
+  "10752": "War",
+  "37": "Western",
+};
+
 // backend/routes/discover.js
 
 router.post("/ai", authMiddleware, async (req, res) => {
@@ -384,23 +406,49 @@ router.get("/hidden-gems", authMiddleware, async (req, res) => {
   }
 });
 
-router.post("/ai-personal", authMiddleware, async (req, res) => {
-  try {
-    if (!req.isPremium) {
-      return res.status(403).json({
-        premiumRequired: true
-      });
-    }
+async function buildTasteInsights(user) {
+  const profile = user.tasteProfile || {};
+  const topGenre = profile.topGenre?.genreId
+    ? {
+        genreId: profile.topGenre.genreId,
+        name: genreNameMap[profile.topGenre.genreId] || "Your favorite genre",
+        count: profile.topGenre.count || 0,
+      }
+    : null;
 
-    const likes = req.user.likes || [];
+  const topDirector = profile.topDirector
+    ? { name: profile.topDirector.name, count: profile.topDirector.count }
+    : null;
 
-    if (likes.length < 3) {
-      return res.json([]);
-    }
+  const topActor = profile.topActor
+    ? { name: profile.topActor.name, count: profile.topActor.count }
+    : null;
 
-    const likedTitles = likes.slice(0, 10).map(l => l.title).join(", ");
+  const weeklyGenre = topGenre?.name || "Mixed tastes";
 
-    const prompt = `
+  return {
+    topGenre,
+    topDirector,
+    topActor,
+    weeklyTrend: {
+      name: weeklyGenre,
+      description: topGenre
+        ? `This week you leaned into ${weeklyGenre}.`
+        : "Start liking movies to build your taste profile.",
+    },
+  };
+}
+
+async function createPremiumPlaylist(user) {
+  const likes = user.likes || [];
+
+  if (likes.length < 3) {
+    return [];
+  }
+
+  const likedTitles = likes.slice(0, 10).map((l) => l.title).join(", ");
+
+  const prompt = `
 User liked these movies:
 ${likedTitles}
 
@@ -412,26 +460,130 @@ Return ONLY JSON, no explanations, no text, no apologies, no disclaimers, no not
 ]
 `;
 
-    const response = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: [{ role: "user", content: prompt }],
-      temperature: 0.9
-    });
+  const response = await openai.chat.completions.create({
+    model: "gpt-4o-mini",
+    messages: [{ role: "user", content: prompt }],
+    temperature: 0.9,
+  });
 
-    const ai = JSON.parse(response.choices[0].message.content);
+  const ai = JSON.parse(response.choices[0].message.content);
+  const movies = [];
 
-    const movies = [];
+  for (const item of ai) {
+    const movie = await fetchFromTMDBByName(item.title);
+    if (movie?.poster_path) movies.push(movie);
+  }
 
-    for (const item of ai) {
-      const movie = await fetchFromTMDBByName(item.title);
-      if (movie?.poster_path) movies.push(movie);
+  return movies.slice(0, 10);
+}
+
+router.post("/ai-personal", authMiddleware, async (req, res) => {
+  try {
+    if (!req.isPremium) {
+      return res.status(403).json({
+        premiumRequired: true,
+      });
     }
 
-    res.json(movies.slice(0, 10));
-
+    const movies = await createPremiumPlaylist(req.user);
+    res.json(movies);
   } catch (e) {
     console.log("AI PERSONAL ERROR", e);
     res.status(500).json([]);
+  }
+});
+
+router.get("/premium-playlist", authMiddleware, async (req, res) => {
+  try {
+    if (!req.isPremium) {
+      return res.status(403).json({ premiumRequired: true });
+    }
+
+    const movies = await createPremiumPlaylist(req.user);
+    res.json(movies);
+  } catch (e) {
+    console.log("PREMIUM PLAYLIST ERROR", e);
+    res.status(500).json([]);
+  }
+});
+
+router.get("/taste-insights", authMiddleware, async (req, res) => {
+  try {
+    const insights = await buildTasteInsights(req.user);
+    return res.json(insights);
+  } catch (err) {
+    console.error("TASTE INSIGHTS ERROR", err);
+    return res.status(500).json({ error: "Failed to load taste insights" });
+  }
+});
+
+router.get("/premium-journey", authMiddleware, async (req, res) => {
+  try {
+    if (!req.isPremium) {
+      return res.status(403).json({ premiumRequired: true });
+    }
+
+    const mood = req.query.mood?.toString() || "relaxed";
+    const runtime = req.query.runtime?.toString();
+    const genres = req.query.genres?.toString();
+    const aura = req.query.aura?.toString();
+
+    const queryParams = new URLSearchParams({
+      api_key: process.env.TMDB_API_KEY,
+      language: "en-US",
+      include_adult: "false",
+      "vote_count.gte": "150",
+      "vote_average.gte": "6.5",
+      sort_by: "popularity.desc",
+    });
+
+    let with_genres = genres || "";
+    let with_keywords = [];
+
+    if (mood && moodMap[mood]) {
+      with_genres = with_genres
+        ? `${with_genres},${moodMap[mood].with_genres}`
+        : moodMap[mood].with_genres;
+    }
+
+    if (aura && auraKeywords[aura]) {
+      if (aura === "romantic") {
+        with_genres = with_genres ? `${with_genres},10749` : "10749";
+      } else {
+        with_keywords.push(auraKeywords[aura]);
+      }
+    }
+
+    if (runtime === "short") queryParams.set("with_runtime.lte", "100");
+    if (runtime === "long") queryParams.set("with_runtime.gte", "130");
+
+    if (with_genres) queryParams.set("with_genres", with_genres);
+    if (with_keywords.length > 0)
+      queryParams.set("with_keywords", with_keywords.join("|"));
+
+    queryParams.set("page", "1");
+
+    const url = `${TMDB_BASE}/discover/movie?${queryParams.toString()}`;
+    const response = await fetch(url);
+    const data = await response.json();
+
+    const movies = (data.results || [])
+      .filter((m) => m.poster_path)
+      .slice(0, 7)
+      .map((movie, index) => ({
+        day: `Day ${index + 1}`,
+        title: movie.title,
+        poster_path: movie.poster_path,
+        overview: movie.overview,
+        runtime: movie.runtime || "",
+        genre: genreNameMap[genres?.split(",")[0]] || genreNameMap[moodMap[mood]?.with_genres?.split(",")[0]] || "Premium pick",
+        reason: `A ${mood} movie with ${runtime || "balanced"} runtime for your premium journey.`,
+      }));
+
+    res.json({ journey: movies });
+  } catch (e) {
+    console.error("PREMIUM JOURNEY ERROR", e);
+    res.status(500).json({ error: "Failed to build premium journey" });
   }
 });
 
