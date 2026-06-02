@@ -5,7 +5,6 @@ import jwt from "jsonwebtoken";
 import User from "../models/User.js";
 
 import { OAuth2Client } from "google-auth-library";
-import Post from "../models/Post.js";
 
 const router = express.Router();
 
@@ -225,10 +224,7 @@ router.get("/profile/:id", async (req, res) => {
 
     if (!user) return res.status(404).json({ error: "User not found" });
 
-    // 2. Postları bul
-    const posts = await Post.find({ userId: targetUserId }).sort({ createdAt: -1 });
-
-    // 3. Takip Kontrolü (Token varsa)
+    // 2. Takip Kontrolü (Token varsa)
     let isFollowing = false;
     const authHeader = req.headers.authorization;
     
@@ -247,16 +243,15 @@ router.get("/profile/:id", async (req, res) => {
       }
     }
 
-    // 4. Veriyi frontend'in beklediği formatta temizleyip gönder
-    res.json({ 
+    // 3. Veriyi frontend'in beklediği formatta temizleyip gönder
+    res.json({
       user: {
         ...user,
         followersCount: user.followers ? user.followers.length : 0,
         followingCount: user.following ? user.following.length : 0,
         favoritesCount: user.favorites ? user.favorites.length : 0,
-        isFollowing 
-      }, 
-      posts 
+        isFollowing
+      }
     });
   } catch (e) {
     console.error("Profile route error:", e);

@@ -13,40 +13,51 @@ const RC_SECRET = process.env.REVENUECAT_SECRET;
 /////////////////////////////////////////////////////
 // Backend: sync.js (Daha güvenli hali)
 router.post("/sync", async (req, res) => {
+  const { userId, appUserId } = req.body || {};
+
+  if (!userId || !appUserId) {
+    return res.status(400).json({ error: "userId and appUserId are required" });
+  }
+
+  // RevenueCat'ten entitlement durumunu çek. RC erişilemezse uygulamayı kırma:
+  // mevcut DB değerini dönüp 200 ver, böylece frontend hata yemez.
+  let premium = null;
+  let rcReachable = true;
+
   try {
-    const { userId, appUserId } = req.body;
-    
+    if (!process.env.REVENUECAT_SECRET) {
+      throw new Error("REVENUECAT_SECRET is not set");
+    }
+
     const response = await axios.get(
       `https://api.revenuecat.com/v1/subscribers/${appUserId}`,
-      {
-        headers: { Authorization: `Bearer ${process.env.REVENUECAT_SECRET}` }
-      }
+      { headers: { Authorization: `Bearer ${process.env.REVENUECAT_SECRET}` } }
     );
 
-    // DEBUG İÇİN: RevenueCat'ten gelen gerçek veriyi gör
-    console.log("RC Raw Data:", JSON.stringify(response.data.subscriber.entitlements, null, 2));
-
-    const entitlements = response.data.subscriber.entitlements || {};
-    
-    // RevenueCat v1 formatında entitlement doğrudan anahtar olarak gelir:
-    // entitlements: { "moodflix-premium": { expires_date: "...", ... } }
-    const premium = entitlements[ENTITLEMENT_ID] || null;
-
-    // Sadece 'active' olması yetmez, süresinin dolup dolmadığını RC halleder ama 
-    // biz nesnenin varlığını kontrol edelim
-    const isPremium = !!premium; 
-
-    const updatedUser = await User.findByIdAndUpdate(
-      userId,
-      { isPremium, premiumExpiresAt: premium?.expires_date || null },
-      { new: true }
-    );
-
-    console.log("Updated User in DB:", updatedUser);
-    res.json({ isPremium: updatedUser.isPremium });
+    const entitlements = response?.data?.subscriber?.entitlements || {};
+    premium = entitlements[ENTITLEMENT_ID] || null;
   } catch (err) {
+    rcReachable = false;
     console.error("RC Sync Error:", err.response?.data || err.message);
-    res.status(500).json({ error: "Sync failed" });
+  }
+
+  try {
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    // RC'ye ulaşabildiysek DB'yi güncelle; ulaşamadıysak mevcut durumu koru.
+    if (rcReachable) {
+      user.isPremium = !!premium;
+      user.premiumExpiresAt = premium?.expires_date || null;
+      await user.save();
+    }
+
+    return res.json({ isPremium: !!user.isPremium, synced: rcReachable });
+  } catch (err) {
+    console.error("Premium sync DB error:", err.message);
+    return res.status(500).json({ error: "Sync failed" });
   }
 });
 
