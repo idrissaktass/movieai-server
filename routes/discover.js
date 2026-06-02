@@ -509,7 +509,19 @@ router.get("/premium-playlist", authMiddleware, async (req, res) => {
 
 router.get("/taste-insights", authMiddleware, async (req, res) => {
   try {
-    const insights = await buildTasteInsights(req.user);
+    const user = req.user;
+    const likesCount = user.likes?.length || 0;
+    const builtAt = user.tasteProfileMeta?.likesCountAtBuild;
+
+    // Beğeni sayısı son inşadan beri değiştiyse profili yeniden hesapla, aksi halde cache'i kullan.
+    if (likesCount >= 1 && builtAt !== likesCount) {
+      const rebuilt = await buildTasteProfile(user, process.env.TMDB_API_KEY);
+      user.tasteProfile = rebuilt;
+      user.tasteProfileMeta = { likesCountAtBuild: likesCount };
+      await user.save();
+    }
+
+    const insights = await buildTasteInsights(user);
     return res.json(insights);
   } catch (err) {
     console.error("TASTE INSIGHTS ERROR", err);

@@ -88,7 +88,6 @@ router.post("/like", authMiddleware, async (req, res) => {
   } else {
     req.user.likes.push({ movieId, title, posterPath, voteAverage, overview });
   }
-  req.user.tasteProfile = {};
   await req.user.save();
   res.json({ likes: req.user.likes, dislikes: req.user.dislikes });
 });
@@ -107,7 +106,6 @@ router.post("/dislike", authMiddleware, async (req, res) => {
   } else {
     req.user.dislikes.push({ movieId, title, posterPath, voteAverage, overview });
   }
-  req.user.tasteProfile = {};
   await req.user.save();
   res.json({ likes: req.user.likes, dislikes: req.user.dislikes });
 });
