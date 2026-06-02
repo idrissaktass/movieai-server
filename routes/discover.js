@@ -417,11 +417,11 @@ async function buildTasteInsights(user) {
     : null;
 
   const topDirector = profile.topDirector
-    ? { name: profile.topDirector.name, count: profile.topDirector.count }
+    ? { id: profile.topDirector.id, name: profile.topDirector.name, count: profile.topDirector.count }
     : null;
 
   const topActor = profile.topActor
-    ? { name: profile.topActor.name, count: profile.topActor.count }
+    ? { id: profile.topActor.id, name: profile.topActor.name, count: profile.topActor.count }
     : null;
 
   const weeklyGenre = topGenre?.name || "Mixed tastes";
