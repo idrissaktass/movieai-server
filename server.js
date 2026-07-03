@@ -5,6 +5,7 @@ import dotenv from "dotenv";
 import recommendRoute from "./routes/discover.js";
 import authRoutes from "./routes/auth.js";
 import favoritesRoutes from "./routes/favorites.js";
+import watchedRoutes from "./routes/watched.js";
 import watchPartyRoutes from "./routes/watchparty.js";
 import { Server } from "socket.io";
 import http from "http";
@@ -18,6 +19,7 @@ app.use(cors());
 app.use(express.json());
 
 app.use("/api/favorites", favoritesRoutes);
+app.use("/api/watched", watchedRoutes);
 app.use("/api/auth", authRoutes);
 app.use("/api/discover", recommendRoute);
 app.use("/api/watchparty", watchPartyRoutes);

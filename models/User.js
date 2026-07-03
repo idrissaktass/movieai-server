@@ -59,6 +59,26 @@ const UserSchema = new mongoose.Schema(
       ],
       default: [],
     },
+  // 🌍 WATCHED (world passport)
+  watched: {
+    type: [
+      {
+        movieId: Number,
+        title: String,
+        posterPath: String,
+        voteAverage: Number,
+        countries: [
+          {
+            iso: String, // ISO 3166-1 alpha-2
+            name: String,
+          },
+        ],
+        watchedAt: { type: Date, default: Date.now },
+      },
+    ],
+    default: [],
+  },
+
   isPremium: {
     type: Boolean,
     default: false,
