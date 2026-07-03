@@ -37,10 +37,10 @@ const authMiddleware = async (req, res, next) => {
 ================================ */
 
 const LEVELS = [
-  { min: 10, key: "expert", label: "Uzman" },
-  { min: 5, key: "cinephile", label: "Sinefil" },
-  { min: 3, key: "enthusiast", label: "Meraklı" },
-  { min: 1, key: "traveler", label: "Gezgin" },
+  { min: 10, key: "expert", label: "Expert" },
+  { min: 5, key: "cinephile", label: "Cinephile" },
+  { min: 3, key: "enthusiast", label: "Enthusiast" },
+  { min: 1, key: "traveler", label: "Traveler" },
 ];
 
 const getLevel = (count) =>
@@ -87,8 +87,7 @@ router.post("/toggle", authMiddleware, async (req, res) => {
    🌍 PASSPORT SUMMARY (per-country stats)
 ================================ */
 
-router.get("/passport", authMiddleware, (req, res) => {
-  const watched = req.user.watched || [];
+function buildPassport(watched) {
   const byCountry = new Map();
 
   for (const w of watched) {
@@ -104,10 +103,28 @@ router.get("/passport", authMiddleware, (req, res) => {
     .map((c) => ({ ...c, level: getLevel(c.count) }))
     .sort((a, b) => b.count - a.count);
 
-  res.json({
+  return {
     totalMovies: watched.length,
     totalCountries: countries.length,
     countries,
+  };
+}
+
+router.get("/passport", authMiddleware, (req, res) => {
+  res.json(buildPassport(req.user.watched || []));
+});
+
+/* ===============================
+   🌍 PASSPORT SUMMARY — bir başka kullanıcı için (karşılaştırma özelliği)
+================================ */
+
+router.get("/passport/:userId", authMiddleware, async (req, res) => {
+  const target = await User.findById(req.params.userId);
+  if (!target) return res.status(404).json({ error: "Kullanıcı bulunamadı" });
+
+  res.json({
+    name: target.name,
+    ...buildPassport(target.watched || []),
   });
 });
 
